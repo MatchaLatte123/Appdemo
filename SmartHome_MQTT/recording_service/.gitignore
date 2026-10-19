@@ -1,0 +1,5 @@
+footage/
+logs/
+footage.sqlite3
+footage.sqlite3-shm
+footage.sqlite3-wal

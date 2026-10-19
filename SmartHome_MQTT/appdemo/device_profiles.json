@@ -38,7 +38,7 @@
           "id": 1,
           "name": "Relay 1",
           "room": "",
-          "mode": "schedule",
+          "mode": "manual",
           "default_state": false,
           "schedule_on": "18:03",
           "schedule_off": "18:04",
@@ -50,7 +50,7 @@
           "id": 2,
           "name": "Relay 2",
           "room": "",
-          "mode": "schedule",
+          "mode": "manual",
           "default_state": false,
           "schedule_on": "18:03",
           "schedule_off": "18:04",
@@ -97,12 +97,12 @@
       ]
     },
     "config_topic": "smarthome/device/relay01/config",
-    "version": 10,
+    "version": 11,
     "last_seen": "192.168.1.239",
-    "synced_version": 10,
-    "device_version": 10,
-    "sync_status": "APPLIED",
-    "ip": "192.168.1.239"
+    "ip": "192.168.1.239",
+    "device_version": 19,
+    "synced_version": 19,
+    "sync_status": "APPLIED"
   },
   "ESP32-CAM-01": {
     "device_id": "ESP32-CAM-01",
