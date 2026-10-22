@@ -990,6 +990,7 @@ class CameraCenter:
         self.ui_fps_window_started = time.monotonic()
         self.ui_frames_presented = 0
         self.ui_fps = 0.0
+        self.video_photo = None
 
         controls = ttk.Frame(self.window, padding=10)
         controls.pack(fill="x")
@@ -1390,7 +1391,7 @@ class CameraCenter:
             did0, session_id, stream_url = value
             self.live_session_id = session_id
             self._start_live_pump(stream_url)
-            self._set_status(f"LIVE: {did0} qua Camera Server")
+            self._set_status(f"LIVE MJPEG: {did0} qua Camera Server")
 
         def failed(error):
             self.busy = False
@@ -1933,9 +1934,14 @@ class CameraCenter:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 image = Image.fromarray(rgb)
                 image.thumbnail((720, 420))
-                photo = ImageTk.PhotoImage(image=image)
-                self.video_label.configure(image=photo, text="")
-                self.video_label.image = photo
+                if self.video_photo is None or self.video_photo.width() != image.width or self.video_photo.height() != image.height:
+                    self.video_photo = ImageTk.PhotoImage(image=image)
+                    self.video_label.configure(image=self.video_photo, text="")
+                    self.video_label.image = self.video_photo
+                else:
+                    # Reuse the Tk image object instead of allocating/destroying
+                    # one image for every frame, which is costly on Windows.
+                    self.video_photo.paste(image)
                 self.ui_frames_presented += 1
             except Exception:
                 pass
@@ -2060,6 +2066,7 @@ class CameraCenter:
         try:
             self.video_label.configure(image="", text="Video đã dừng")
             self.video_label.image = None
+            self.video_photo = None
         except tk.TclError:
             pass
 

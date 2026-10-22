@@ -327,12 +327,12 @@ DELETE /api/exports/{export_id}
 
 Timestamp query values must be timezone-aware ISO 8601. Footage and playback
 manifest responses contain ordered segments and explicit gaps. MP4 file routes
-support single HTTP byte ranges for seeking. Live sessions return a
-server-relative MJPEG URL. The recorder copies the original JPEG frames from
-the same FFmpeg camera input used for recording, then relays them to viewers
-without transcoding or opening another camera connection. Slow viewers receive
-the newest available frame instead of accumulating a growing delay. A live
-session expires after eight hours if it is not explicitly deleted.
+support single HTTP byte ranges for seeking. Live sessions return a continuous
+server-relative MJPEG stream. The recorder copies the original JPEG frames from
+the same FFmpeg camera input used for recording and relays only the newest frame
+to each viewer. Live viewing does not open another camera connection or add a
+second video encoder. A live session expires after eight hours if it is not
+explicitly deleted.
 
 Example requests:
 

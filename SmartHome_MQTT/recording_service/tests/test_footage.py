@@ -65,6 +65,8 @@ class FootageManagerTests(unittest.TestCase):
         command = recorder._ffmpeg_command(pattern, listing)
         self.assertEqual(command.count("-i"), 1)
         self.assertIn("segment", command)
+        self.assertEqual(command.count("libx264"), 1)
+        self.assertNotIn("hls", command)
         self.assertIn("image2pipe", command)
         self.assertNotIn("-t", command)
 
@@ -353,6 +355,7 @@ class FootageManagerTests(unittest.TestCase):
             with urlopen(create_live, timeout=2) as response:
                 live = json.loads(response.read().decode("utf-8"))
             self.assertEqual(live["transport"], "mjpeg")
+            self.assertTrue(live["stream_url"].endswith("/stream.mjpg"))
             frame = b"\xff\xd8test-jpeg\xff\xd9"
             service.recorders["cam01"].live_frames.publish(frame)
             with urlopen(base + live["stream_url"], timeout=2) as response:

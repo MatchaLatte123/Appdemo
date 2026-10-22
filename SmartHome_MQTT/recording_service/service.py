@@ -251,7 +251,7 @@ class CameraRecorder:
             "-segment_list", str(segment_list), "-segment_list_type", "csv",
             "-segment_list_flags", "+live", str(segment_pattern),
             # Copy the already-compressed camera JPEGs to stdout for live
-            # clients. This path does not decode or re-encode the live image.
+            # live clients. The server shares the source without live transcoding.
             "-map", "0:v:0", "-c:v", "copy", "-f", "image2pipe", "pipe:1",
         ]
 
@@ -641,16 +641,16 @@ class RecordingService:
         return {"session_id": session_id, "camera_id": camera_id,
                 "stream_url": f"/api/live-sessions/{session_id}/stream.mjpg",
                 "expires_at": expires_at.isoformat(), "transport": "mjpeg",
-                "note": "Original camera JPEG frames are relayed through the recorder's shared input without live transcoding."}
+                "note": "Original JPEG frames are relayed from the recorder's shared camera input."}
 
     def live_file(self, session_id: str, filename: str) -> Path | None:
         session = self.live_session(session_id)
-        if not session or not re.fullmatch(r"index\.m3u8|live_\d{9,}\.ts", filename):
+        if not session or not re.fullmatch(r"index\.m3u8|[A-Za-z0-9_.-]+_live_\d{9,}\.ts", filename):
             return None
         recorder = self.recorders.get(session["camera_id"])
         if not recorder:
             return None
-        root = (self.storage_dir / "live" / recorder.file_id).resolve()
+        root = (self.storage_dir.parent / "_live" / recorder.file_id).resolve()
         target = (root / filename).resolve()
         if not target.is_relative_to(root) or not target.is_file():
             return None
@@ -808,7 +808,7 @@ class RecordingService:
                             except (BrokenPipeError, ConnectionResetError, OSError):
                                 pass
                             return
-                        match = re.fullmatch(r"/api/live-sessions/([0-9a-fA-F-]{36})/(index\.m3u8|live_\d{9,}\.ts)", parsed.path)
+                        match = re.fullmatch(r"/api/live-sessions/([0-9a-fA-F-]{36})/(index\.m3u8|[A-Za-z0-9_.-]+_live_\d{9,}\.ts)", parsed.path)
                         if not match:
                             self.send_error(404, "Live session not found")
                             return
