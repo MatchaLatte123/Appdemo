@@ -1,6 +1,6 @@
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import json
 import queue
 import time
@@ -55,8 +55,8 @@ pending_devices = {}
 # so 25 seconds gives enough tolerance without keeping powered-off devices.
 DISCOVERY_TTL_SECONDS = 15
 DISCOVERY_CLEANUP_INTERVAL_MS = 2000
-RECORDING_SERVICE_STATUS_URL = "http://127.0.0.1:8765/api/status"
-RECORDING_SERVICE_BASE_URL = "http://127.0.0.1:8765"
+RECORDING_SERVICE_STATUS_URL = "http://192.168.1.130:8765/api/status"
+RECORDING_SERVICE_BASE_URL = "http://192.168.1.130:8765"
 recording_service_status = "SERVER OFFLINE"
 recording_status_check_lock = threading.Lock()
 recording_status_check_running = False
@@ -948,6 +948,9 @@ class CameraCenter:
         self.service_status = tk.StringVar(value="Đang tải trạng thái Server...")
         self.storage_status = tk.StringVar(value="Storage: --")
         self.current_max_storage_gb = 5.0
+        self.current_cleanup_target_gib = 4.5
+        self.current_storage_dir = ""
+        self.current_cleanup_enabled = True
         self.current_storage_used_bytes = 0
         self.storage_update_busy = False
         self.media_status = tk.StringVar(value="Chưa phát video")
@@ -1008,8 +1011,8 @@ class CameraCenter:
         storage_row.pack(fill="x", anchor="w")
         ttk.Label(storage_row, textvariable=self.storage_status).pack(side="left")
         self.storage_settings_button = ttk.Button(
-            storage_row, text="Quản lý dung lượng (tạm tắt)",
-            command=self.open_storage_settings, state="disabled"
+            storage_row, text="Storage Settings",
+            command=self.open_storage_settings
         )
         self.storage_settings_button.pack(side="left", padx=10)
 
@@ -1139,12 +1142,16 @@ class CameraCenter:
             maximum = int(storage.get("max_bytes", 0))
             if maximum > 0:
                 self.current_max_storage_gb = maximum / (1024 ** 3)
+            self.current_cleanup_target_gib = float(storage.get("cleanup_target_gib", 4.5))
+            self.current_storage_dir = str(storage.get("storage_dir", self.current_storage_dir))
+            self.current_cleanup_enabled = bool(storage.get("cleanup_enabled", True))
             self.storage_status.set(
                 f"Storage: {self._bytes(used)} / {self._bytes(maximum)}"
-                + (" | Quản lý dung lượng: tạm tắt"
-                   if not storage.get("management_enabled", False)
-                   else (f" | Dọn dẹp: {storage['warning']}" if storage.get("warning")
-                         else " | Dọn dẹp: OK"))
+                + (f" | Còn trống: {self._bytes(storage['disk_free_bytes'])}"
+                   if storage.get("disk_free_bytes") is not None else " | Storage chưa sẵn sàng")
+                + (f" | Cảnh báo: {storage['disk_warning']}" if storage.get("disk_warning") else "")
+                + (f" | Dọn dẹp: {storage['warning']}" if storage.get("warning")
+                   else (" | Dọn dẹp: bật" if storage.get("cleanup_enabled") else " | Dọn dẹp: tắt"))
             )
             self._show_camera_state()
 
@@ -1183,49 +1190,117 @@ class CameraCenter:
         dialog.grab_set()
         body = ttk.Frame(dialog, padding=14)
         body.pack(fill="both", expand=True)
-        ttk.Label(body, text="Dung lượng tối đa (GiB)").grid(row=0, column=0, sticky="w")
-        value_var = tk.StringVar(value=f"{self.current_max_storage_gb:.2f}")
-        ttk.Entry(body, textvariable=value_var, width=12).grid(row=0, column=1, padx=(10, 0))
-        ttk.Label(body, text="Khi vượt giới hạn, Server dọn bản ghi cũ nhất đến 90% giới hạn.\n"
-                             "Bản ghi đang ghi và footage được bảo vệ sẽ được giữ lại.",
-                  justify="left", wraplength=340).grid(row=1, column=0, columnspan=2,
+        path_var = tk.StringVar(value=self.current_storage_dir)
+        max_var = tk.StringVar(value=f"{self.current_max_storage_gb:.2f}")
+        target_var = tk.StringVar(value=f"{self.current_cleanup_target_gib:.2f}")
+        enabled_var = tk.BooleanVar(value=self.current_cleanup_enabled)
+        ttk.Label(body, text="Thư mục footage").grid(row=0, column=0, sticky="w")
+        ttk.Entry(body, textvariable=path_var, width=48).grid(row=0, column=1, padx=8, sticky="ew")
+
+        def browse():
+            selected = filedialog.askdirectory(parent=dialog, initialdir=path_var.get() or None,
+                                               mustexist=False, title="Chọn thư mục lưu footage")
+            if selected:
+                path_var.set(selected)
+
+        ttk.Button(body, text="Browse...", command=browse).grid(row=0, column=2)
+        ttk.Label(body, text="Giới hạn tối đa (GiB)").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(body, textvariable=max_var, width=14).grid(row=1, column=1, sticky="w", pady=(8, 0))
+        ttk.Label(body, text="Ngưỡng sau dọn dẹp (GiB)").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(body, textvariable=target_var, width=14).grid(row=2, column=1, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(body, text="Bật tự động dọn segment cũ", variable=enabled_var).grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Label(body, text="Chỉ segment hoàn tất, cũ nhất và không protected/đang dùng mới đủ điều kiện xóa.\n"
+                             "Đổi thư mục không di chuyển footage cũ; recorder sẽ đóng segment rồi chuyển root.",
+                  justify="left", wraplength=500).grid(row=4, column=0, columnspan=3,
                                                        sticky="w", pady=(10, 12))
-        ttk.Label(body, text=f"Đang dùng: {self._bytes(self.current_storage_used_bytes)}  |  "
-                             f"Giới hạn hiện tại: {self.current_max_storage_gb:.2f} GiB",
-                  foreground="gray").grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        usage_label = ttk.Label(body, text=f"Đang dùng: {self._bytes(self.current_storage_used_bytes)}  |  "
+                                          f"Giới hạn: {self.current_max_storage_gb:.2f} GiB",
+                                foreground="gray")
+        usage_label.grid(row=5, column=0, columnspan=3, sticky="w", pady=(0, 10))
+        state_label = ttk.Label(body, text="Recording Service: đang tải trạng thái", foreground="gray")
+        state_label.grid(row=6, column=0, columnspan=3, sticky="w", pady=(0, 10))
+
+        def populate_from_server(data):
+            path_var.set(str(data.get("storage_dir", path_var.get())))
+            max_var.set(f"{float(data.get('max_storage_gib', self.current_max_storage_gb)):.2f}")
+            target_var.set(f"{float(data.get('cleanup_target_gib', self.current_cleanup_target_gib)):.2f}")
+            enabled_var.set(bool(data.get("cleanup_enabled", self.current_cleanup_enabled)))
+            free = data.get("disk_free_bytes")
+            usage_label.configure(text=f"Đang dùng: {self._bytes(int(data.get('used_bytes') or 0))}  |  "
+                                        f"Ổ đĩa còn: {self._bytes(free) if free is not None else 'không khả dụng'}")
+            recorders = ", ".join(f"{item.get('camera_id')}: {item.get('recorder_state')}"
+                                  for item in data.get("recorders", [])) or "không có recorder"
+            warning = data.get("disk_warning") or data.get("warning") or data.get("last_error") or "OK"
+            state_label.configure(
+                text=f"Recording Service: {data.get('service_state', 'unknown')} | "
+                     f"Storage Manager: {'bật' if data.get('cleanup_enabled') else 'tắt'} | "
+                     f"{recorders} | {warning}")
+
+        def refresh_settings():
+            if self.storage_update_busy:
+                return
+            self.storage_update_busy = True
+
+            def done(data):
+                self.storage_update_busy = False
+                populate_from_server(data)
+
+            def failed(error):
+                self.storage_update_busy = False
+                self._set_status(f"Không tải được Storage Settings: {error}")
+
+            self._run_worker(lambda: self._request("/api/storage/settings", timeout=5), done, failed)
+
+        refresh_settings()
 
         def save():
+            if self.storage_update_busy:
+                return
             try:
-                new_limit = float(value_var.get().strip().replace(",", "."))
-                if not 0.1 <= new_limit <= 1024:
+                new_limit = float(max_var.get().strip().replace(",", "."))
+                new_target = float(target_var.get().strip().replace(",", "."))
+                if not 0.1 <= new_limit <= 1024 or not 0 <= new_target < new_limit:
                     raise ValueError
             except ValueError:
-                messagebox.showerror("Dung lượng không hợp lệ",
-                                     "Nhập dung lượng từ 0.1 đến 1024 GiB.", parent=dialog)
+                messagebox.showerror("Cấu hình không hợp lệ",
+                                     "Nhập giới hạn 0.1–1024 GiB và ngưỡng từ 0 đến nhỏ hơn giới hạn.",
+                                     parent=dialog)
                 return
             current_used = self.current_storage_used_bytes
-            if new_limit * (1024 ** 3) < current_used:
+            confirm_cleanup = False
+            same_path = Path(path_var.get().strip()).resolve() == Path(self.current_storage_dir).resolve()
+            limit_reduced = new_limit < self.current_max_storage_gb
+            cleanup_newly_enabled = enabled_var.get() and not self.current_cleanup_enabled
+            if enabled_var.get() and (not same_path or new_limit * (1024 ** 3) < current_used
+                                      or limit_reduced or cleanup_newly_enabled):
                 if not messagebox.askyesno(
-                    "Xác nhận dọn footage",
-                    "Giới hạn mới thấp hơn dung lượng đang dùng. Server có thể xóa các bản ghi cũ nhất "
-                    "chưa được bảo vệ để giảm dung lượng về khoảng 90% giới hạn mới. Tiếp tục?",
+                    "Xác nhận áp dụng Storage Settings",
+                    "Khi bật cleanup, Recording Service có thể xóa segment hoàn tất cũ nhất chưa protected/đang dùng "
+                    "trong kho được quản lý nếu vượt giới hạn. Đổi thư mục không di chuyển footage cũ. Tiếp tục?",
                     parent=dialog,
                 ):
                     return
+                confirm_cleanup = True
             dialog.destroy()
             self.storage_update_busy = True
-            self._set_status("Đang lưu giới hạn dung lượng và cập nhật dọn dẹp trên Server...")
+            self._set_status("Đang xác thực và áp dụng Storage Settings trên Server...")
 
             def work():
                 return self._request("/api/storage/settings", "POST",
-                                     {"max_storage_gb": new_limit}, timeout=45)
+                                     {"storage_dir": path_var.get().strip(),
+                                      "max_storage_gib": new_limit,
+                                      "cleanup_target_gib": new_target,
+                                      "cleanup_enabled": bool(enabled_var.get()),
+                                      "confirm_cleanup": confirm_cleanup}, timeout=60)
 
             def done(result):
                 self.storage_update_busy = False
-                self.current_max_storage_gb = float(result.get("max_storage_gb", new_limit))
-                deleted = int(result.get("deleted_count", 0))
-                self._set_status(f"Đã cập nhật giới hạn: {self.current_max_storage_gb:.2f} GiB; "
-                                 f"Server đã dọn {deleted} bản ghi cũ")
+                self.current_max_storage_gb = float(result.get("max_storage_gib", new_limit))
+                self.current_cleanup_target_gib = float(result.get("cleanup_target_gib", new_target))
+                self.current_storage_dir = str(result.get("storage_dir", path_var.get()))
+                self.current_cleanup_enabled = bool(result.get("cleanup_enabled", enabled_var.get()))
+                self._set_status("Đã lưu cấu hình Storage Manager. Footage cũ vẫn nằm ở thư mục trước đó.")
                 self.refresh_status()
 
             def failed(error):
@@ -1235,9 +1310,10 @@ class CameraCenter:
             self._run_worker(work, done, failed)
 
         controls = ttk.Frame(body)
-        controls.grid(row=3, column=0, columnspan=2, sticky="e")
+        controls.grid(row=7, column=0, columnspan=3, sticky="e")
+        ttk.Button(controls, text="Refresh", command=refresh_settings).pack(side="left", padx=(0, 8))
         ttk.Button(controls, text="Hủy", command=dialog.destroy).pack(side="right", padx=(6, 0))
-        ttk.Button(controls, text="Lưu", command=save).pack(side="right")
+        ttk.Button(controls, text="Lưu / Áp dụng", command=save).pack(side="right")
 
     def _show_camera_state(self):
         did = self.camera_id.get()

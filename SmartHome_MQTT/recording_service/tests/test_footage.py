@@ -159,6 +159,7 @@ class FootageManagerTests(unittest.TestCase):
                         '../outside.mp4', 10, 'complete', 0)
             """)
         start = datetime(2026, 10, 17, 7, tzinfo=UTC)
+        self.store.reconcile()
         self.assertEqual(self.store.query("cam01", start, start + timedelta(hours=1)), [])
         self.assertEqual(self.store.get("bad-row")["status"], "invalid")
 
@@ -228,6 +229,123 @@ class FootageManagerTests(unittest.TestCase):
                                    end_time=start + timedelta(minutes=1), duration=60,
                                    file_path=external, file_size=external.stat().st_size)
         self.assertTrue(external.exists())
+
+    def test_cleanup_preserves_playback_lease_and_keeps_metadata(self):
+        start = datetime(2026, 10, 17, 7, tzinfo=UTC)
+        path = self.add_segment("leased", start, start + timedelta(minutes=1), size=20)
+        manager = StorageManager(self.store, max_bytes=16, cleanup_target_bytes=8, logger=self.logger)
+        self.assertTrue(manager.acquire_file(path))
+        result = manager.cleanup()
+        self.assertTrue(path.exists())
+        self.assertEqual(self.store.get("leased")["status"], "complete")
+        self.assertIsNotNone(result["warning"])
+        manager.release_file(path)
+        with manager.usage_lock:
+            manager.deleting_paths.add(path.resolve())
+        self.assertFalse(manager.acquire_file(path))
+        with manager.usage_lock:
+            manager.deleting_paths.discard(path.resolve())
+
+    def test_failed_file_delete_does_not_mark_metadata_deleted(self):
+        start = datetime(2026, 10, 17, 7, tzinfo=UTC)
+        path = self.add_segment("locked", start, start + timedelta(minutes=1), size=20)
+        manager = StorageManager(self.store, max_bytes=16, cleanup_target_bytes=8, logger=self.logger)
+        with patch.object(Path, "unlink", side_effect=PermissionError("locked")):
+            result = manager.cleanup()
+        self.assertTrue(path.exists())
+        self.assertEqual(self.store.get("locked")["status"], "complete")
+        self.assertIsNotNone(result["warning"])
+
+    def test_status_uses_cached_usage_without_recursive_inventory(self):
+        manager = StorageManager(self.store, max_bytes=100, cleanup_target_bytes=80, logger=self.logger)
+        manager._cached_used_bytes = 42
+        with patch.object(manager, "_physical_files", side_effect=AssertionError("unexpected scan")):
+            status = manager.status()
+        self.assertEqual(status["used_bytes"], 42)
+
+    def test_cleanup_requests_use_a_bounded_single_slot_queue(self):
+        manager = StorageManager(self.store, max_bytes=100, cleanup_target_bytes=80, logger=self.logger)
+        self.assertTrue(manager.request_cleanup())
+        self.assertFalse(manager.request_cleanup())
+        self.assertFalse(manager.request_inventory())
+
+    def test_storage_root_change_keeps_old_footage_indexed_in_place(self):
+        config = {
+            "storage_dir": "footage", "metadata_db": "footage.sqlite3",
+            "cameras": [{"camera_id": "cam01", "stream_url": "http://127.0.0.1:81/stream"}],
+        }
+        service_dir = Path(self.temp.name) / "root-change-service"
+        service = RecordingService(config, service_dir)
+        old_root = service.storage_dir.resolve()
+        start = datetime(2026, 10, 17, 7, tzinfo=UTC)
+        old_file = service.storage_dir / "cam01" / "old.mp4"
+        old_file.parent.mkdir(parents=True, exist_ok=True)
+        old_file.write_bytes(b"old-footage")
+        service.store.add_segment(recording_id="old-root", device_id="cam01", start_time=start,
+                                  end_time=start + timedelta(minutes=1), duration=60,
+                                  file_path=old_file, file_size=old_file.stat().st_size)
+        new_root = Path(self.temp.name) / "alternate-drive" / "footage"
+        try:
+            invalid_target = Path(self.temp.name) / "not-a-directory"
+            invalid_target.write_text("keep", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                service.update_storage_settings({
+                    "storage_dir": str(invalid_target), "max_storage_gib": 5.0,
+                    "cleanup_target_gib": 4.5, "cleanup_enabled": False,
+                })
+            self.assertEqual(service.storage_dir.resolve(), old_root)
+            with patch.object(service.recorders["cam01"], "stop"), \
+                 patch.object(service.recorders["cam01"], "start"):
+                result = service.update_storage_settings({
+                    "storage_dir": str(new_root), "max_storage_gib": 5.0,
+                    "cleanup_target_gib": 4.5, "cleanup_enabled": False,
+                })
+            record = service.store.get("old-root")
+            self.assertEqual(Path(record["storage_root"]), old_root)
+            self.assertTrue(service.store.resolve_record_file(record).is_file())
+            self.assertTrue(old_file.is_file())
+            self.assertEqual(Path(result["storage_dir"]), new_root.resolve())
+            self.assertTrue(new_root.is_dir())
+            saved_config = json.loads((service_dir / "config.json").read_text(encoding="utf-8"))
+            self.assertEqual(Path(saved_config["storage_dir"]), new_root.resolve())
+            restarted = RecordingService(saved_config, service_dir, service_dir / "config.json")
+            try:
+                self.assertEqual(restarted.storage_dir, new_root.resolve())
+                self.assertEqual(restarted.store.get("old-root")["status"], "complete")
+            finally:
+                for handler in restarted.logger.handlers[:]:
+                    handler.flush()
+                    handler.close()
+                    restarted.logger.removeHandler(handler)
+        finally:
+            service.storage_manager.stop_worker()
+            for handler in service.logger.handlers[:]:
+                handler.flush()
+                handler.close()
+                service.logger.removeHandler(handler)
+
+    def test_missing_storage_volume_does_not_fall_back_or_create_service_directory(self):
+        unavailable = Path(self.temp.name) / "unmounted-drive" / "footage"
+        config = {
+            "storage_dir": str(unavailable), "metadata_db": "footage.sqlite3",
+            "cleanup_enabled": False,
+            "cameras": [{"camera_id": "cam01", "stream_url": "http://127.0.0.1:81/stream"}],
+        }
+        service_dir = Path(self.temp.name) / "offline-service"
+        with patch("recording_service.service.validate_storage_directory",
+                   side_effect=ValueError("volume is unavailable")):
+            service = RecordingService(config, service_dir)
+        try:
+            status = service.storage_manager.status()
+            self.assertEqual(service.storage_dir, unavailable.resolve())
+            self.assertFalse(unavailable.exists())
+            self.assertFalse(status["storage_available"])
+            self.assertIn("volume is unavailable", status["last_error"])
+        finally:
+            for handler in service.logger.handlers[:]:
+                handler.flush()
+                handler.close()
+                service.logger.removeHandler(handler)
 
     def test_export_command_reencodes_clips_and_preserves_gaps(self):
         start = datetime(2026, 10, 17, 7, tzinfo=UTC)
@@ -349,6 +467,30 @@ class FootageManagerTests(unittest.TestCase):
             self.assertIn("max_bytes", status["storage"])
             self.assertIn("last_media_at", status["cameras"][0])
             self.assertNotIn("stream_url", status["cameras"][0])
+            with urlopen(base + "/api/storage/settings", timeout=2) as response:
+                settings = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(settings["max_storage_gib"], 5.0)
+            self.assertIn("storage_dir", settings)
+            validated_dir = Path(self.temp.name) / "api-created-storage"
+            validate_request = Request(
+                base + "/api/storage/validate",
+                data=json.dumps({"storage_dir": str(validated_dir)}).encode("utf-8"),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urlopen(validate_request, timeout=2) as response:
+                validation = json.loads(response.read().decode("utf-8"))
+            self.assertTrue(validation["valid"])
+            self.assertTrue(validated_dir.is_dir())
+            update_request = Request(
+                base + "/api/storage/settings",
+                data=json.dumps({"storage_dir": str(service.storage_dir),
+                                 "max_storage_gib": 5.0, "cleanup_target_gib": 4.5,
+                                 "cleanup_enabled": False}).encode("utf-8"),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urlopen(update_request, timeout=2) as response:
+                updated = json.loads(response.read().decode("utf-8"))
+            self.assertFalse(updated["cleanup_enabled"])
+            saved = json.loads((service_dir / "config.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["max_storage_gib"], 5.0)
 
             create_live = Request(base + "/api/live-sessions", data=b'{"device_id":"cam01"}',
                                   headers={"Content-Type": "application/json"}, method="POST")

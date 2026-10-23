@@ -280,8 +280,8 @@ The service records each enabled camera even when no viewer is connected. It
 keeps one FFmpeg process and one camera input per camera, retries with
 exponential backoff, and cuts five-minute MP4 files from that continuous input
 without reconnecting the camera at each segment boundary. It writes segments
-under `recording_service/footage/` and enforces
-`max_storage_gb` across that footage directory. Finished files are named `.mp4`;
+under the configured storage directory (default `recording_service/footage/`)
+and enforces the configured GiB quota. Finished files are named `.mp4`;
 interrupted or unverified files retain the `.partial.mp4` suffix and are omitted
 from footage listings.
 
@@ -358,10 +358,24 @@ Example responses (fields abbreviated):
 {"device_id":"ESP32-CAM-01","segments":[{"recording_id":"00000000-0000-4000-8000-000000000001","start_time":"2026-10-17T07:00:00Z","end_time":"2026-10-17T07:05:00Z","playback_url":"/api/recordings/00000000-0000-4000-8000-000000000001/file"}],"gaps":[]}
 ```
 
-Storage usage and the configured limit remain visible, but quota changes and
-automatic cleanup are temporarily disabled. The AppDemo control is disabled and
-`POST /api/storage/settings` returns HTTP 503. Existing footage is not removed
-by the storage manager while this switch is off.
+Storage Manager is configurable in Camera Center with **Storage Settings**.
+Defaults are 5 GiB maximum and 4.5 GiB cleanup target (1 GiB = 1,073,741,824
+bytes); cleanup can be disabled. When usage passes the maximum, the Recording
+Service removes the oldest completed, unprotected, unused managed segments until
+it reaches the target. Partial, active, protected, unindexed, and in-use files
+are preserved. If eligible files are insufficient, status and logs report that
+the target was not reached.
+
+Storage settings are read and written through `GET /api/storage/settings` and
+`POST /api/storage/settings`; `POST /api/storage/validate` checks a selected
+directory. The service validates write access before persisting settings. A
+directory change stops each recorder cleanly so FFmpeg can close its current
+segment, then restarts recording at the new location. Existing footage remains
+in its original directory and remains indexed; it is not moved or cleaned as
+part of the new directory's quota. `GET /api/status` returns cached usage,
+configured limits, volume free space, storage availability, and recent cleanup
+information. Cleanup runs on one bounded background worker, while the status
+endpoint avoids a recursive file scan.
 
 AppDemo no longer opens the ESP32 MJPEG URL directly because the current
 firmware serves only one HTTP stream client. Its camera card polls the local
@@ -389,7 +403,10 @@ python .\mqtt_test_console.py
 ```
 
 On a camera device card, choose **CAMERA CENTER: LIVE / PLAYBACK**. Refresh
-Server/Storage, choose a configured camera, then press **Live**. Close it with
+Server/Storage, choose a configured camera, then press **Live**. Use
+**Storage Settings** to browse to a storage directory, set the maximum and
+cleanup target, and enable or disable cleanup. Confirm when the new limit is
+below current usage and could trigger deletion. Close live view with
 **Đóng Live**; this deletes only the viewing session. For playback, enter a
 date and start/end time, load the footage timeline, and press **Play khoảng
 giờ**. The Server exports the selected range to one MP4, so the progress bar,
@@ -427,3 +444,7 @@ Start-ScheduledTask -TaskName SmartHomeCameraRecording
 Use `uninstall_recording_task.ps1` to stop and remove the task. This user-level
 task starts at logon (without requiring an elevated/system service install),
 restarts after process failures, and ignores duplicate launches.
+
+For a source-verified architecture guide covering the ESP32-CAM, Recording
+Service, storage lifecycle, API, task startup, and proposed Flutter integration,
+see [Camera System documentation](docs/CAMERA_SYSTEM.md).

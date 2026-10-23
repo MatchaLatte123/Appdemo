@@ -43,7 +43,34 @@ from .footage_manager import (
 
 BASE_DIR = Path(__file__).resolve().parent
 CAMERA_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
-STORAGE_MANAGEMENT_ENABLED = False
+
+
+def validate_storage_directory(value: str | Path, base_dir: Path) -> Path:
+    """Create and verify a storage directory without touching existing footage."""
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = base_dir / candidate
+    candidate = candidate.resolve()
+    if candidate == candidate.parent:
+        raise ValueError("The volume root itself cannot be used as the footage directory")
+    existing = candidate
+    while not existing.exists() and existing != existing.parent:
+        existing = existing.parent
+    if not existing.is_dir():
+        raise ValueError("Storage path parent is not an accessible directory")
+    try:
+        shutil.disk_usage(existing)
+        candidate.mkdir(parents=True, exist_ok=True)
+        probe = candidate / f".storage_probe_{uuid.uuid4().hex}.tmp"
+        with probe.open("xb") as handle:
+            handle.write(b"storage-check")
+            handle.flush()
+            os.fsync(handle.fileno())
+        probe.unlink()
+        shutil.disk_usage(candidate)
+    except OSError as exc:
+        raise ValueError(f"Storage directory is unavailable or not writable: {exc}") from exc
+    return candidate
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -310,7 +337,7 @@ class CameraRecorder:
                     self.last_error_at = None
                 self.logger.info("Published continuous segment camera=%s duration=%.2fs path=%s",
                                  self.camera_id, duration, final_path)
-                self.storage_manager.cleanup()
+                self.storage_manager.request_cleanup()
             except Exception as exc:
                 self._record_error(f"Could not publish segment {candidate.name}: {exc}")
                 self.logger.exception("Could not publish closed segment camera=%s path=%s",
@@ -357,7 +384,7 @@ class CameraRecorder:
             processed_segments: set[str] = set()
             previous_end: datetime | None = None
             try:
-                self.storage_manager.cleanup()
+                self.storage_manager.request_cleanup()
                 segment_pattern, segment_list, stem, started_at = self._new_paths()
                 self.logger.info("Starting FFmpeg camera=%s url=%s output=%s", self.camera_id,
                                  self.stream_url, segment_pattern.name)
@@ -395,6 +422,7 @@ class CameraRecorder:
                         current_size = 0
                     now = time.monotonic()
                     if current_size > last_size:
+                        self.storage_manager.mark_storage_ready()
                         with self.lock:
                             self.state = "recording"
                             self.last_media_at = datetime.now(timezone.utc).isoformat()
@@ -487,24 +515,36 @@ class RecordingService:
         self.config_path = (config_path or service_dir / "config.json").resolve()
         self.storage_settings_lock = threading.Lock()
         configured_storage = Path(config.get("storage_dir", "footage"))
-        self.storage_dir = configured_storage if configured_storage.is_absolute() else service_dir / configured_storage
+        if not configured_storage.is_absolute():
+            configured_storage = service_dir / configured_storage
+        self.storage_dir = configured_storage.resolve()
+        storage_startup_error: str | None = None
+        try:
+            self.storage_dir = validate_storage_directory(self.storage_dir, service_dir)
+        except ValueError as exc:
+            # Keep the configured destination and expose the problem through the
+            # API; never fall back to another volume or stop service discovery.
+            storage_startup_error = str(exc)
         self.logger = configure_logging(service_dir / "logs")
         database_setting = Path(config.get("metadata_db", "footage.sqlite3"))
         database_path = database_setting if database_setting.is_absolute() else service_dir / database_setting
-        self.store = FootageStore(database_path, self.storage_dir, self.logger)
+        self.store = FootageStore(database_path, self.storage_dir, self.logger,
+                                  create_storage_root=storage_startup_error is None)
         gib = 1024 ** 3
         self.storage_manager = StorageManager(
             self.store,
-            max_bytes=int(float(config.get("max_storage_gb", 5.0)) * gib),
-            cleanup_target_bytes=int(float(config.get("cleanup_target_gb", 4.5)) * gib),
+            max_bytes=int(float(config.get("max_storage_gib", config.get("max_storage_gb", 5.0))) * gib),
+            cleanup_target_bytes=int(float(config.get("cleanup_target_gib", config.get("cleanup_target_gb", 4.5))) * gib),
             logger=self.logger,
-            enabled=STORAGE_MANAGEMENT_ENABLED,
+            enabled=bool(config.get("cleanup_enabled", True)),
         )
+        self.storage_manager.last_error = storage_startup_error
         self.export_manager = ExportManager(
             self.store, self.storage_dir,
             ffmpeg=str(config.get("ffmpeg_path", "ffmpeg")),
             ffprobe=str(config.get("ffprobe_path", "ffprobe")),
             logger=self.logger,
+            storage_manager=self.storage_manager,
         )
         self.store.reconcile()
         self.storage_manager.cleanup()
@@ -524,37 +564,116 @@ class RecordingService:
         self.live_sessions: dict[str, dict[str, Any]] = {}
         self.live_lock = threading.Lock()
 
-    def update_storage_limit(self, max_storage_gb: float) -> dict[str, Any]:
-        if not self.storage_manager.enabled:
-            raise RuntimeError("Storage management is temporarily disabled")
-        if not math.isfinite(max_storage_gb) or not 0.1 <= max_storage_gb <= 1024:
-            raise ValueError("max_storage_gb must be between 0.1 and 1024 GiB")
-        gib = 1024 ** 3
-        max_bytes = int(max_storage_gb * gib)
+    def storage_settings(self) -> dict[str, Any]:
+        status = self.storage_manager.status()
+        return {
+            "storage_dir": str(self.storage_dir),
+            "max_storage_gib": self.storage_manager.max_bytes / (1024 ** 3),
+            "cleanup_target_gib": self.storage_manager.cleanup_target_bytes / (1024 ** 3),
+            "cleanup_enabled": self.storage_manager.enabled,
+            "segment_duration_seconds": int(self.config.get("segment_duration_seconds",
+                                                              self.config.get("segment_seconds", 300))),
+            "service_state": "stopping" if self.stopping.is_set() else "running",
+            "recorders": [recorder.snapshot() for recorder in self.recorders.values()],
+            **status,
+        }
+
+    def update_storage_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        max_storage_gib = payload.get("max_storage_gib", self.storage_manager.max_bytes / (1024 ** 3))
+        cleanup_target_gib = payload.get("cleanup_target_gib", self.storage_manager.cleanup_target_bytes / (1024 ** 3))
+        cleanup_enabled = payload.get("cleanup_enabled", self.storage_manager.enabled)
+        storage_value = payload.get("storage_dir", str(self.storage_dir))
+        if isinstance(max_storage_gib, bool) or not isinstance(max_storage_gib, (int, float)):
+            raise ValueError("max_storage_gib must be a number")
+        if isinstance(cleanup_target_gib, bool) or not isinstance(cleanup_target_gib, (int, float)):
+            raise ValueError("cleanup_target_gib must be a number")
+        if not isinstance(cleanup_enabled, bool):
+            raise ValueError("cleanup_enabled must be a boolean")
+        if not math.isfinite(max_storage_gib) or not 0.1 <= max_storage_gib <= 1024:
+            raise ValueError("max_storage_gib must be between 0.1 and 1024 GiB")
+        if (not math.isfinite(cleanup_target_gib) or cleanup_target_gib < 0
+                or cleanup_target_gib >= max_storage_gib):
+            raise ValueError("cleanup_target_gib must be nonnegative and below max_storage_gib")
+        new_root = validate_storage_directory(str(storage_value), self.config_path.parent)
+        old_root = self.storage_dir.resolve()
         old_max = self.storage_manager.max_bytes
         old_target = self.storage_manager.cleanup_target_bytes
-        target_ratio = min(0.99, max(0.0, old_target / old_max))
-        cleanup_target_bytes = int(max_bytes * target_ratio)
+        old_enabled = self.storage_manager.enabled
+        old_export_manager = self.export_manager
+        old_storage_error = self.storage_manager.last_error
+        old_used = self.storage_manager.status()["used_bytes"]
+        same_root = new_root == old_root
+        quota_reduced = int(max_storage_gib * (1024 ** 3)) < old_max
+        enabling_cleanup = cleanup_enabled and not old_enabled
+        will_cleanup = cleanup_enabled and (
+            not same_root or old_used > int(max_storage_gib * (1024 ** 3))
+            or quota_reduced or enabling_cleanup
+        )
+        if will_cleanup and not payload.get("confirm_cleanup", False):
+            raise ValueError("Applying these settings may delete old unprotected footage; confirm_cleanup is required")
+        gib = 1024 ** 3
+        max_bytes = int(max_storage_gib * gib)
+        cleanup_target_bytes = int(cleanup_target_gib * gib)
+        updated = dict(self.config)
+        updated.update({"storage_dir": str(new_root), "max_storage_gib": float(max_storage_gib),
+                        "cleanup_target_gib": float(cleanup_target_gib),
+                        "cleanup_enabled": cleanup_enabled})
+        root_changed = new_root != old_root
         with self.storage_settings_lock:
-            updated = dict(self.config)
-            updated["max_storage_gb"] = float(max_storage_gb)
-            updated["cleanup_target_gb"] = cleanup_target_bytes / gib
-            self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary_path = self.config_path.with_name(self.config_path.name + ".tmp")
+            stopped: list[CameraRecorder] = []
+            if not cleanup_enabled:
+                self.storage_manager.wait_for_idle()
+            if root_changed:
+                for recorder in self.recorders.values():
+                    recorder.stop()
+                    if recorder.thread.is_alive():
+                        for item in stopped:
+                            item.start()
+                        raise RuntimeError(f"Recorder {recorder.camera_id} did not stop safely; storage path unchanged")
+                    stopped.append(recorder)
             try:
-                temporary_path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
-                os.replace(temporary_path, self.config_path)
-            finally:
-                temporary_path.unlink(missing_ok=True)
-            self.storage_manager.configure_limit(max_bytes, cleanup_target_bytes)
-            self.config.clear()
-            self.config.update(updated)
-            result = self.storage_manager.cleanup()
-        status = self.storage_manager.status()
-        status["max_storage_gb"] = float(max_storage_gb)
-        status["cleanup_target_gb"] = cleanup_target_bytes / gib
-        status["deleted_count"] = len(result.get("deleted_recording_ids", []))
-        return status
+                self.storage_manager.set_root(new_root)
+                self.storage_manager.last_error = None
+                self.storage_manager.configure_limit(max_bytes, cleanup_target_bytes)
+                self.storage_manager.configure_enabled(cleanup_enabled)
+                self.storage_dir = new_root
+                for recorder in self.recorders.values():
+                    recorder.storage_dir = new_root / recorder.file_id
+                    recorder.retention_dir = new_root
+                self.export_manager = ExportManager(
+                    self.store, new_root, ffmpeg=str(self.config.get("ffmpeg_path", "ffmpeg")),
+                    ffprobe=str(self.config.get("ffprobe_path", "ffprobe")), logger=self.logger,
+                    storage_manager=self.storage_manager)
+                temporary_path = self.config_path.with_name(self.config_path.name + ".tmp")
+                try:
+                    temporary_path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
+                    os.replace(temporary_path, self.config_path)
+                finally:
+                    temporary_path.unlink(missing_ok=True)
+                self.config.clear()
+                self.config.update(updated)
+            except Exception:
+                if root_changed:
+                    self.storage_manager.set_root(old_root)
+                    self.storage_dir = old_root
+                    for recorder in self.recorders.values():
+                        recorder.storage_dir = old_root / recorder.file_id
+                        recorder.retention_dir = old_root
+                    self.export_manager = old_export_manager
+                self.storage_manager.configure_limit(old_max,
+                    old_target)
+                self.storage_manager.configure_enabled(old_enabled)
+                self.storage_manager.last_error = old_storage_error
+                for recorder in stopped:
+                    recorder.start()
+                raise
+            for recorder in stopped:
+                recorder.start()
+        if cleanup_enabled:
+            self.storage_manager.request_cleanup()
+        elif root_changed:
+            self.storage_manager.request_inventory()
+        return self.storage_settings()
 
     def start(self) -> None:
         self.server = ThreadingHTTPServer(
@@ -562,6 +681,7 @@ class RecordingService:
             self._handler_type(),
         )
         self.server.daemon_threads = True
+        self.storage_manager.start_worker()
         for recorder in self.recorders.values():
             recorder.start()
         self.logger.info("Recording service listening at http://%s:%s",
@@ -586,16 +706,23 @@ class RecordingService:
                 self.server.server_close()
             for recorder in self.recorders.values():
                 recorder.stop()
+            self.storage_manager.stop_worker()
         finally:
             self.stop_complete.set()
 
     def status(self) -> dict[str, Any]:
+        storage = self.storage_manager.status()
+        storage.update({
+            "storage_dir": str(self.storage_dir),
+            "cleanup_target_gib": self.storage_manager.cleanup_target_bytes / (1024 ** 3),
+            "cleanup_enabled": self.storage_manager.enabled,
+        })
         return {
             "service": "running" if not self.stopping.is_set() else "stopping",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "ffmpeg_available": shutil.which(str(self.config.get("ffmpeg_path", "ffmpeg"))) is not None,
             "cameras": [r.snapshot() for r in self.recorders.values()],
-            "storage": self.storage_manager.status(),
+            "storage": storage,
         }
 
     def footage(self, camera_id: str, start: datetime, end: datetime) -> dict[str, Any]:
@@ -604,7 +731,7 @@ class RecordingService:
             raise KeyError(camera_id)
         records = self.store.query(camera_id, start, end)
         for record in records:
-            record["file_exists"] = self.store.resolve_file(record["file_path"]).is_file()
+            record["file_exists"] = self.store.resolve_record_file(record).is_file()
         return {
             "camera_id": camera_id,
             "device_id": camera_id,
@@ -620,7 +747,7 @@ class RecordingService:
         record = self.store.get(recording_id)
         if not record or record.get("status") != "complete":
             raise KeyError(recording_id)
-        path = self.store.resolve_file(record["file_path"])
+        path = self.store.resolve_record_file(record)
         if not path.is_file() or path.suffix.lower() != ".mp4":
             raise KeyError(recording_id)
         return self._public_record(record), path
@@ -678,6 +805,23 @@ class RecordingService:
                 self.wfile.write(data)
 
             def _send_file(self, path: Path, content_type: str, *, download_name: str | None = None) -> None:
+                managed = path.resolve().is_relative_to(service.storage_dir.resolve())
+                if managed:
+                    if not service.storage_manager.acquire_file(path):
+                        self.send_error(404, "Footage is being removed")
+                        return
+                    if not path.is_file():
+                        service.storage_manager.release_file(path)
+                        self.send_error(404, "Footage file is no longer available")
+                        return
+                try:
+                    self._send_file_inner(path, content_type, download_name=download_name)
+                finally:
+                    if managed:
+                        service.storage_manager.release_file(path)
+
+            def _send_file_inner(self, path: Path, content_type: str,
+                                 *, download_name: str | None = None) -> None:
                 size = path.stat().st_size
                 range_header = self.headers.get("Range")
                 start, end, status = 0, size - 1, 200
@@ -726,6 +870,8 @@ class RecordingService:
                 try:
                     if parsed.path in ("/", "/health", "/api/status"):
                         body = service.status()
+                    elif parsed.path == "/api/storage/settings":
+                        body = service.storage_settings()
                     elif parsed.path == "/api/footage":
                         query = parse_qs(parsed.query)
                         camera_id = query.get("device_id", query.get("camera_id", [""]))[0]
@@ -852,13 +998,13 @@ class RecordingService:
                     if not isinstance(payload, dict):
                         raise ValueError("Request JSON must be an object")
                     if parsed.path == "/api/storage/settings":
-                        if not service.storage_manager.enabled:
-                            self.send_error(503, "Storage management is temporarily disabled")
-                            return
-                        value = payload.get("max_storage_gb")
-                        if isinstance(value, bool) or not isinstance(value, (int, float)):
-                            raise ValueError("max_storage_gb must be a number")
-                        self._send_json(service.update_storage_limit(float(value)))
+                        self._send_json(service.update_storage_settings(payload))
+                        return
+                    if parsed.path == "/api/storage/validate":
+                        path = validate_storage_directory(str(payload.get("storage_dir", "")),
+                                                          service.config_path.parent)
+                        self._send_json({"valid": True, "storage_dir": str(path),
+                                         "disk_free_bytes": shutil.disk_usage(path).free})
                         return
                     if parsed.path == "/api/export":
                         device_id = str(payload.get("device_id", ""))
