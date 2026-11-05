@@ -1,5 +1,6 @@
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <mqtt_secrets.h>
 
 // PubSubClient mặc định chỉ cho packet nhỏ. Camera gửi JSON discovery/status
 // dài hơn nên tăng buffer trước khi include thư viện.
@@ -261,7 +262,7 @@ void mc() {
   Serial.print(":");
   Serial.println(MQTT_PORT);
 
-  if (mqtt.connect(ID)) {
+  if (mqtt.connect(ID, MQTT_USERNAME, MQTT_PASSWORD)) {
     Serial.println("[MQTT] CONNECTED");
 
     bool subOK = mqtt.subscribe(SEC);

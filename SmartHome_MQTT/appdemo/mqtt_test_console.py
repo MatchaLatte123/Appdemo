@@ -1,4 +1,5 @@
 import threading
+import webbrowser
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import json
@@ -57,6 +58,8 @@ DISCOVERY_TTL_SECONDS = 15
 DISCOVERY_CLEANUP_INTERVAL_MS = 2000
 RECORDING_SERVICE_STATUS_URL = "http://192.168.1.130:8765/api/status"
 RECORDING_SERVICE_BASE_URL = "http://192.168.1.130:8765"
+SECURITY_SERVICE_STATUS_URL = "http://192.168.1.130:8787/api/status"
+SECURITY_SERVICE_URL = "http://192.168.1.130:8787"
 recording_service_status = "SERVER OFFLINE"
 recording_status_check_lock = threading.Lock()
 recording_status_check_running = False
@@ -2529,6 +2532,7 @@ def connect():
             mqtt.CallbackAPIVersion.VERSION2,
             client_id="SmartHome-MQTT-TestConsole"
         )
+        client.username_pw_set(username="smarthome_admin", password="Admin123")
 
         client.on_connect = connected
         client.on_disconnect = disconnected
@@ -2895,6 +2899,41 @@ conn.grid(
     row=0,
     column=5
 )
+
+
+# ============================================================
+# AI SECURITY — PHASE 1 COLLECTOR MONITORING
+# ============================================================
+
+security_panel = ttk.LabelFrame(content_frame, text="AI Security · Data Collector", padding=8)
+security_panel.pack(fill="x", padx=10, pady=5)
+security_service_status = tk.StringVar(value="Chưa kiểm tra dịch vụ")
+ttk.Label(security_panel, text="Collector:").pack(side="left")
+ttk.Label(security_panel, textvariable=security_service_status).pack(side="left", padx=6)
+
+
+def open_security_dashboard():
+    webbrowser.open(SECURITY_SERVICE_URL)
+
+
+def check_security_service():
+    def worker():
+        try:
+            req = Request(SECURITY_SERVICE_STATUS_URL, headers={"User-Agent": "SmartHome-AppDemo"})
+            with urlopen(req, timeout=3) as response:
+                info = json.loads(response.read().decode("utf-8"))
+            text = f"MQTT: {info.get('mqtt', 'UNKNOWN')} | Network: {info.get('network', 'UNKNOWN')}"
+        except Exception:
+            text = "OFFLINE — chưa kết nối được Security Service"
+        try:
+            root.after(0, lambda: security_service_status.set(text))
+        except Exception:
+            pass
+    threading.Thread(target=worker, daemon=True).start()
+
+
+ttk.Button(security_panel, text="KIỂM TRA COLLECTOR", command=check_security_service).pack(side="left", padx=8)
+ttk.Button(security_panel, text="MỞ SECURITY DASHBOARD", command=open_security_dashboard).pack(side="left", padx=4)
 
 
 # ============================================================

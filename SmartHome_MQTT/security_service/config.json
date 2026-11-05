@@ -1,0 +1,16 @@
+{
+  "server": {"host": "0.0.0.0", "port": 8787},
+  "mqtt": {
+    "host": "192.168.1.130", "port": 1883,
+    "username": "security_collector", "password": "Admin123",
+    "client_id": "SmartHome-AI-Security-Collector", "keepalive": 60,
+    "topics": ["smarthome/device/+/status", "smarthome/device/+/telemetry", "smarthome/device/announce", "smarthome/device/register", "smarthome/security/#", "smarthome/device/cam01/security"]
+  },
+  "network": {"enabled": true, "interface": "", "window_seconds": 5, "flush_interval_seconds": 1, "bpf_filter": "ip or ip6"},
+  "storage": {"database": "data/security.db", "retention_days": 30},
+  "devices": [
+    {"device_id": "ESP32-RELAY-01", "type": "relay", "ip": ""},
+    {"device_id": "ESP32-FAN-01", "type": "fan", "ip": ""},
+    {"device_id": "ESP32-CAM-01", "type": "camera", "ip": "192.168.1.252"}
+  ]
+}

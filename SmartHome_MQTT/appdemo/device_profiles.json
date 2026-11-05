@@ -131,10 +131,10 @@
       ]
     },
     "config_topic": "smarthome/device/relay01/config",
-    "version": 26,
+    "version": 28,
     "last_seen": "192.168.1.239",
-    "device_version": 26,
-    "synced_version": 26,
+    "device_version": 28,
+    "synced_version": 28,
     "sync_status": "APPLIED",
     "ip": "192.168.1.239"
   },
@@ -149,10 +149,10 @@
       "scenario_mode": "manual",
       "temperature_enabled": false,
       "temperature_on": 30.0,
-      "temperature_off": 29.0,
+      "temperature_off": 27.0,
       "schedule_enabled": false,
-      "schedule_on": "23:09",
-      "schedule_off": "23:15",
+      "schedule_on": "08:00",
+      "schedule_off": "22:00",
       "schedule_days": [
         "mon",
         "tue",
@@ -171,10 +171,10 @@
       }
     },
     "config_topic": "smarthome/device/fan01/config",
-    "version": 12,
+    "version": 7,
     "last_seen": "192.168.1.78",
-    "synced_version": 12,
-    "device_version": 12,
+    "synced_version": 7,
+    "device_version": 7,
     "sync_status": "APPLIED",
     "ip": "192.168.1.78"
   }

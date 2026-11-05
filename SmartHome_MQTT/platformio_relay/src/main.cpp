@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <time.h>
+#include "mqtt_secrets.h"
 
 // Forward declarations
 void publishStatus();
@@ -808,7 +809,7 @@ bool connectMQTT() {
 
   String clientId = String(DEVICE_ID) + "-" + String((uint32_t)ESP.getEfuseMac(), HEX);
 
-  if (mqttClient.connect(clientId.c_str())) {
+  if (mqttClient.connect(clientId.c_str(), MQTT_USERNAME, MQTT_PASSWORD)) {
     bool a = mqttClient.subscribe(TOPIC_CONTROL, 1);
     bool b = mqttClient.subscribe(TOPIC_SECURITY, 1);
     bool c = mqttClient.subscribe(TOPIC_CONFIG, 1);

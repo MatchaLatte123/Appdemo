@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <time.h>
+#include "mqtt_secrets.h"
 
 // =====================================================
 // WIFI
@@ -1976,9 +1977,11 @@ bool connectMQTT() {
       );
 
   if (
-      mqttClient.connect(
-          clientId.c_str()
-      )
+    mqttClient.connect(
+        clientId.c_str(),
+        MQTT_USERNAME,
+        MQTT_PASSWORD
+    )
   ) {
 
     bool subControl =

@@ -3,3 +3,6 @@ logs/
 footage.sqlite3
 footage.sqlite3-shm
 footage.sqlite3-wal
+password.txt
+acl.conf
+mosquitto.conf
