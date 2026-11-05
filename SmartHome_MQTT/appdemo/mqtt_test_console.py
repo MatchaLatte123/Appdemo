@@ -112,16 +112,26 @@ def default_settings_for(device_type):
             "schedule_enabled": False,
             "schedule_on": "08:00",
             "schedule_off": "22:00",
-            "schedule_days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+            "schedule_days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+            "motion": {
+                "enabled": False,
+                "sensor_id": "PIR-FAN-01",
+                "gpio": 22,
+                "hold_seconds": 120,
+                "cooldown_seconds": 3,
+            }
         }
     if dtype == "relay":
+        pir_defaults = [
+            ("PIR-SR602-01", 16), ("PIR-SR602-02", 17),
+            ("PIR-SR602-03", None), ("PIR-SR602-04", None),
+        ]
+        days_default = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
         return {
             "rooms": [],
             "channels": [
-                {"id": 1, "name": "Relay 1", "room": "", "mode": "manual", "default_state": False, "schedule_on": "08:00", "schedule_off": "22:00", "schedule_days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]},
-                {"id": 2, "name": "Relay 2", "room": "", "mode": "manual", "default_state": False, "schedule_on": "08:00", "schedule_off": "22:00", "schedule_days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]},
-                {"id": 3, "name": "Relay 3", "room": "", "mode": "manual", "default_state": False, "schedule_on": "08:00", "schedule_off": "22:00", "schedule_days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]},
-                {"id": 4, "name": "Relay 4", "room": "", "mode": "manual", "default_state": False, "schedule_on": "08:00", "schedule_off": "22:00", "schedule_days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}
+                {"id": i + 1, "name": f"Relay {i + 1}", "room": "", "automation_mode": "manual", "motion": {"sensor_id": sensor, "gpio": gpio, "configured": False, "hold_seconds": 120, "cooldown_seconds": 3}, "default_state": False, "schedule_on": "08:00", "schedule_off": "22:00", "schedule_days": days_default.copy()}
+                for i, (sensor, gpio) in enumerate(pir_defaults)
             ]
         }
     if dtype == "camera":
@@ -275,6 +285,17 @@ def sync_profile(device_id):
         settings["scenario_mode"] = mode
         settings["temperature_enabled"] = mode in ("temperature", "both")
         settings["schedule_enabled"] = mode in ("schedule", "both")
+        motion_defaults = default_settings_for("fan")["motion"]
+        motion = dict(motion_defaults)
+        if isinstance(settings.get("motion"), dict):
+            motion.update(settings["motion"])
+        motion["enabled"] = bool(motion.get("enabled", False))
+        motion["sensor_id"] = str(motion.get("sensor_id") or "PIR-FAN-01")
+        # This SR602 is physically wired to GPIO22; do not silently remap it.
+        motion["gpio"] = 22
+        motion["hold_seconds"] = max(1, min(3600, int(motion.get("hold_seconds", 120))))
+        motion["cooldown_seconds"] = max(0, min(60, int(motion.get("cooldown_seconds", 3))))
+        settings["motion"] = motion
     elif p.get("type") == "relay":
         # Keep four-channel relay profiles backward-compatible with older
         # two-channel local profiles.
@@ -290,7 +311,28 @@ def sync_profile(device_id):
             base["id"] = i + 1
             base["name"] = str(base.get("name") or f"Relay {i + 1}")
             base["room"] = str(base.get("room") or "")
-            base["mode"] = base.get("mode") if base.get("mode") in ("manual", "schedule") else "manual"
+            old_mode = base.get("mode", "manual")
+            mode = base.get("automation_mode")
+            new_profile_mode = mode in ("manual", "motion", "schedule", "schedule_motion")
+            if mode not in ("manual", "motion", "schedule", "schedule_motion"):
+                mode = "schedule" if old_mode == "schedule" else "manual"
+            base["automation_mode"] = mode
+            # Older relay firmware reads mode; motion-only safely degrades to manual.
+            base["mode"] = "schedule" if mode in ("schedule", "schedule_motion") else "manual"
+            defaults_motion = defaults["channels"][i]["motion"]
+            motion = dict(defaults_motion)
+            if isinstance(base.get("motion"), dict):
+                motion.update(base["motion"])
+            sensor_gpios = {"PIR-SR602-01": 16, "PIR-SR602-02": 17, "PIR-SR602-03": None, "PIR-SR602-04": None}
+            if motion.get("sensor_id") not in sensor_gpios:
+                motion["sensor_id"] = defaults_motion["sensor_id"]
+            motion["gpio"] = sensor_gpios[motion["sensor_id"]]
+            motion["configured"] = bool(motion.get("configured", False)) if new_profile_mode else False
+            motion["configured"] = motion["configured"] and motion["gpio"] is not None
+            motion.pop("enabled", None)
+            motion["hold_seconds"] = max(1, min(3600, int(motion.get("hold_seconds", 120))))
+            motion["cooldown_seconds"] = max(0, min(60, int(motion.get("cooldown_seconds", 3))))
+            base["motion"] = motion
             base["default_state"] = bool(base.get("default_state", False))
             base["schedule_on"] = str(base.get("schedule_on") or "08:00")
             base["schedule_off"] = str(base.get("schedule_off") or "22:00")
@@ -477,7 +519,7 @@ def edit_profile(device_id):
     dtype = p.get("type", "unknown")
     dialog = tk.Toplevel(root)
     dialog.title("Device Profile")
-    dialog.geometry("1100x700" if dtype == "relay" else "560x620")
+    dialog.geometry("1450x720" if dtype == "relay" else ("560x850" if dtype == "fan" else "560x620"))
     dialog.transient(root)
     dialog.grab_set()
 
@@ -518,7 +560,7 @@ def edit_profile(device_id):
         channel_frame = ttk.LabelFrame(dialog, text="4 Channel Relay", padding=8)
         channel_frame.pack(fill="both", expand=True, padx=15, pady=8)
 
-        headers = ["CH", "Tên channel", "Phòng", "Chế độ", "Mặc định", "ON", "OFF", "Ngày chạy"]
+        headers = ["CH", "Tên channel", "Phòng", "Automation", "Mặc định", "PIR", "GPIO", "Hold s", "Cooldown s", "ON", "OFF", "Ngày chạy"]
         for col, text in enumerate(headers):
             ttk.Label(channel_frame, text=text, font=("Segoe UI", 9, "bold")).grid(row=0, column=col, padx=4, pady=4, sticky="w")
 
@@ -527,7 +569,19 @@ def edit_profile(device_id):
             ttk.Label(channel_frame, text=f"CH{i}").grid(row=i, column=0, padx=4, pady=5, sticky="w")
             nvar = tk.StringVar(value=str(c.get("name") or f"Relay {i}"))
             rvar = tk.StringVar(value=str(c.get("room") or ""))
-            mvar = tk.StringVar(value=c.get("mode") if c.get("mode") in ("manual", "schedule") else "manual")
+            old_mode = c.get("mode", "manual")
+            mvar = tk.StringVar(value=c.get("automation_mode") if c.get("automation_mode") in ("manual", "motion", "schedule", "schedule_motion") else ("schedule" if old_mode == "schedule" else "manual"))
+            motion = c.get("motion") if isinstance(c.get("motion"), dict) else {}
+            defaults_motion = defaults["channels"][i - 1]["motion"]
+            pir_sensor_gpios = {"PIR-SR602-01": 16, "PIR-SR602-02": 17, "PIR-SR602-03": None, "PIR-SR602-04": None}
+            sensor_ids = tuple(pir_sensor_gpios)
+            initial_sensor = motion.get("sensor_id") if motion.get("sensor_id") in pir_sensor_gpios else defaults_motion["sensor_id"]
+            motion_selected = tk.BooleanVar(value=bool(motion.get("configured", False)) and pir_sensor_gpios[initial_sensor] is not None)
+            sensor_var = tk.StringVar(value=initial_sensor)
+            initial_gpio = pir_sensor_gpios[initial_sensor]
+            gpio_var = tk.StringVar(value=f"GPIO{initial_gpio}" if initial_gpio is not None else "Chưa kết nối")
+            hold_var = tk.StringVar(value=str(motion.get("hold_seconds", 120)))
+            cooldown_var = tk.StringVar(value=str(motion.get("cooldown_seconds", 3)))
             svar = tk.BooleanVar(value=bool(c.get("default_state", False)))
             onvar = tk.StringVar(value=str(c.get("schedule_on") or "08:00"))
             offvar = tk.StringVar(value=str(c.get("schedule_off") or "22:00"))
@@ -537,15 +591,48 @@ def edit_profile(device_id):
             combo.grid(row=i, column=2, padx=4, pady=5)
             if rvar.get():
                 combo.set(rvar.get())
-            ttk.Combobox(channel_frame, textvariable=mvar, state="readonly", values=("manual", "schedule"), width=11).grid(row=i, column=3, padx=4, pady=5)
+            mode_combo = ttk.Combobox(channel_frame, textvariable=mvar, state="readonly", values=("manual", "motion", "schedule", "schedule_motion"), width=17)
+            mode_combo.grid(row=i, column=3, padx=4, pady=5)
             ttk.Checkbutton(channel_frame, variable=svar).grid(row=i, column=4, padx=4, pady=5)
-            ttk.Entry(channel_frame, textvariable=onvar, width=8).grid(row=i, column=5, padx=4, pady=5)
-            ttk.Entry(channel_frame, textvariable=offvar, width=8).grid(row=i, column=6, padx=4, pady=5)
+            sensor_combo = ttk.Combobox(channel_frame, textvariable=sensor_var, state="readonly", values=sensor_ids, width=17)
+            sensor_combo.grid(row=i, column=5, padx=4, pady=5)
+            ttk.Label(channel_frame, textvariable=gpio_var).grid(row=i, column=6, padx=4, pady=5)
+            hold_entry = ttk.Entry(channel_frame, textvariable=hold_var, width=7)
+            hold_entry.grid(row=i, column=7, padx=4, pady=5)
+            cooldown_entry = ttk.Entry(channel_frame, textvariable=cooldown_var, width=8)
+            cooldown_entry.grid(row=i, column=8, padx=4, pady=5)
+            on_entry = ttk.Entry(channel_frame, textvariable=onvar, width=8)
+            on_entry.grid(row=i, column=9, padx=4, pady=5)
+            off_entry = ttk.Entry(channel_frame, textvariable=offvar, width=8)
+            off_entry.grid(row=i, column=10, padx=4, pady=5)
             days_frame = ttk.Frame(channel_frame)
-            days_frame.grid(row=i, column=7, padx=2, pady=2, sticky="w")
+            days_frame.grid(row=i, column=11, padx=2, pady=2, sticky="w")
             for j, (day, label) in enumerate(zip(day_vars, ("T2", "T3", "T4", "T5", "T6", "T7", "CN"))):
                 ttk.Checkbutton(days_frame, text=label, variable=day_vars[day]).grid(row=0, column=j, padx=1)
-            row_vars.append((nvar, rvar, mvar, svar, onvar, offvar, day_vars))
+            schedule_widgets = [on_entry, off_entry, days_frame]
+            motion_widgets = [channel_frame.grid_slaves(row=i, column=5)[0], channel_frame.grid_slaves(row=i, column=6)[0], hold_entry, cooldown_entry]
+            def update_mode_widgets(*_, mv=mvar, sched=schedule_widgets, motion_controls=motion_widgets, channel=i):
+                schedule_visible = mv.get() in ("schedule", "schedule_motion")
+                motion_visible = mv.get() in ("motion", "schedule_motion")
+                for widget in sched:
+                    widget.grid() if schedule_visible else widget.grid_remove()
+                for widget in motion_controls:
+                    widget.grid() if motion_visible else widget.grid_remove()
+            mode_combo.bind("<<ComboboxSelected>>", update_mode_widgets)
+            mode_combo.bind(
+                "<<ComboboxSelected>>",
+                lambda _event, mv=mvar, selected=motion_selected: selected.set(True)
+                if mv.get() in ("motion", "schedule_motion") else None,
+                add="+"
+            )
+            def on_sensor_selected(_event=None, sv=sensor_var, gv=gpio_var, selected=motion_selected, gpio_map=pir_sensor_gpios):
+                selected_gpio = gpio_map.get(sv.get())
+                gv.set(f"GPIO{selected_gpio}" if selected_gpio is not None else "Chưa kết nối")
+                if selected_gpio is not None:
+                    selected.set(True)
+            sensor_combo.bind("<<ComboboxSelected>>", on_sensor_selected)
+            update_mode_widgets()
+            row_vars.append((nvar, rvar, mvar, svar, onvar, offvar, day_vars, hold_var, cooldown_var, motion_selected, sensor_var))
 
         def add_room():
             room = room_var.get().strip()
@@ -581,7 +668,7 @@ def edit_profile(device_id):
 
         ttk.Label(
             dialog,
-            text="manual: điều khiển bằng ON/OFF trên card | schedule: ON tại giờ Schedule ON và OFF tại Schedule OFF | cùng tên phòng có thể gán cho nhiều channel.",
+            text="Manual: chỉ điều khiển tay | Motion: PIR giữ relay bật theo Hold | Schedule: relay ON theo lịch | Schedule + Motion: lịch chỉ giới hạn giờ PIR hoạt động; relay chỉ ON khi có chuyển động. CH3/CH4 chưa có cảm biến.",
             foreground="gray",
             wraplength=720
         ).pack(anchor="w", padx=15, pady=5)
@@ -589,15 +676,21 @@ def edit_profile(device_id):
         def save_edit():
             new_channels = []
             for i, vars_ in enumerate(row_vars, start=1):
-                nvar, rvar, mvar, svar, onvar, offvar, day_vars = vars_
+                nvar, rvar, mvar, svar, onvar, offvar, day_vars, hold_var, cooldown_var, motion_selected, sensor_var = vars_
                 mode_value = mvar.get().strip()
-                if mode_value not in ("manual", "schedule"):
+                if mode_value not in ("manual", "motion", "schedule", "schedule_motion"):
                     mode_value = "manual"
+                selected_sensor = sensor_var.get()
+                selected_gpio = pir_sensor_gpios.get(selected_sensor)
+                if mode_value == "motion" and selected_gpio is None:
+                    messagebox.showwarning("Automation", "Cảm biến đã chọn chưa có GPIO khả dụng.")
+                    return
                 new_channels.append({
                     "id": i,
                     "name": nvar.get().strip() or f"Relay {i}",
                     "room": rvar.get().strip(),
-                    "mode": mode_value,
+                    "automation_mode": mode_value,
+                    "motion": {"sensor_id": selected_sensor, "gpio": selected_gpio, "configured": selected_gpio is not None and motion_selected.get(), "hold_seconds": max(1, min(3600, int(hold_var.get() or 120))), "cooldown_seconds": max(0, min(60, int(cooldown_var.get() or 3)))},
                     "default_state": bool(svar.get()),
                     "schedule_on": onvar.get().strip() or "08:00",
                     "schedule_off": offvar.get().strip() or "22:00",
@@ -647,6 +740,14 @@ def edit_profile(device_id):
         day_labels = ("Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "CN")
         saved_days = s.get("schedule_days", list(all_days))
         schedule_day_vars = {day: tk.BooleanVar(value=day in saved_days) for day in all_days}
+        motion = dict(default_settings_for("fan")["motion"])
+        if isinstance(s.get("motion"), dict):
+            motion.update(s["motion"])
+        motion_enabled = tk.BooleanVar(value=bool(motion.get("enabled", False)))
+        motion_sensor_id = tk.StringVar(value=str(motion.get("sensor_id") or "PIR-FAN-01"))
+        motion_gpio = tk.IntVar(value=22)
+        motion_hold = tk.IntVar(value=int(motion.get("hold_seconds", 120)))
+        motion_cooldown = tk.IntVar(value=int(motion.get("cooldown_seconds", 3)))
 
         ttk.Label(f, text="Scenario mode").grid(row=0, column=0, sticky="w", pady=4)
         ttk.Combobox(f, textvariable=mode, state="readonly", width=18, values=("manual", "temperature", "schedule", "both")).grid(row=0, column=1, sticky="w", padx=8)
@@ -666,6 +767,18 @@ def edit_profile(device_id):
         for i, (day, label) in enumerate(zip(all_days, day_labels)):
             ttk.Checkbutton(days_frame, text=label, variable=schedule_day_vars[day]).grid(row=i // 4, column=i % 4, sticky="w")
         ttk.Label(f, text="temperature/both: dùng DHT11 | schedule/both: dùng giờ NTP", foreground="gray").grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 2))
+
+        mf = ttk.LabelFrame(dialog, text="Motion Detection", padding=10)
+        mf.pack(fill="x", padx=15, pady=(0, 10))
+        ttk.Checkbutton(mf, text="Enable Motion Detection", variable=motion_enabled).grid(row=0, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Label(mf, text="Sensor ID").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(mf, textvariable=motion_sensor_id, width=22).grid(row=1, column=1, sticky="w", padx=8)
+        ttk.Label(mf, text="GPIO").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Entry(mf, textvariable=motion_gpio, width=8, state="readonly").grid(row=2, column=1, sticky="w", padx=8)
+        ttk.Label(mf, text="Hold Time (seconds)").grid(row=3, column=0, sticky="w", pady=4)
+        ttk.Spinbox(mf, from_=1, to=3600, textvariable=motion_hold, width=8).grid(row=3, column=1, sticky="w", padx=8)
+        ttk.Label(mf, text="Cooldown (seconds)").grid(row=4, column=0, sticky="w", pady=4)
+        ttk.Spinbox(mf, from_=0, to=60, textvariable=motion_cooldown, width=8).grid(row=4, column=1, sticky="w", padx=8)
 
     def save_edit():
         settings = s.copy()
@@ -689,6 +802,13 @@ def edit_profile(device_id):
                 "schedule_on": schedule_on.get().strip(),
                 "schedule_off": schedule_off.get().strip(),
                 "schedule_days": [day for day in all_days if schedule_day_vars[day].get()],
+                "motion": {
+                    "enabled": bool(motion_enabled.get()),
+                    "sensor_id": motion_sensor_id.get().strip() or "PIR-FAN-01",
+                    "gpio": 22,
+                    "hold_seconds": max(1, min(3600, int(motion_hold.get()))),
+                    "cooldown_seconds": max(0, min(60, int(motion_cooldown.get()))),
+                },
             })
         save_device_profile(device_id, name.get().strip() or device_id, room.get().strip(), settings, dtype, p.get("config_topic"))
         sync_profile(device_id)
@@ -2820,7 +2940,7 @@ def create_device_card(device_id, profile):
             ch_id = i + 1
             ch_name = c.get("name") or f"Relay {ch_id}"
             room_name = c.get("room") or "Chưa gán phòng"
-            mode_name = c.get("mode") or "manual"
+            mode_name = c.get("automation_mode") or c.get("mode") or "manual"
             ttk.Label(card, text=f"CH{ch_id} - {ch_name}").grid(row=2+i, column=0, sticky="w", pady=2)
             ttk.Label(card, text=f"[{room_name}] {mode_name}").grid(row=2+i, column=1, sticky="w", pady=2)
             widgets[f"relay{ch_id}"] = ttk.Label(card, text="OFF")

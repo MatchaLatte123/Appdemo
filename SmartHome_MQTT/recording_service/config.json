@@ -5,7 +5,7 @@
   "ffprobe_path": "ffprobe",
   "segment_seconds": 300,
   "min_complete_ratio": 0.95,
-  "storage_dir": "G:\\DACNTT\\demo_git_clone\\Appdemo\\SmartHome_MQTT\\recording_service\\footage",
+  "storage_dir": "G:\\DACNTT\\old_git\\Appdemo\\SmartHome_MQTT\\recording_service\\footages",
   "metadata_db": "footage.sqlite3",
   "max_storage_gib": 0.5,
   "cleanup_target_gib": 0.45,

@@ -1,109 +1,4 @@
 {
-  "ESP32-FAN-01": {
-    "device_id": "ESP32-FAN-01",
-    "type": "fan",
-    "name": "ESP32-FAN-01",
-    "room": "",
-    "settings": {
-      "default_level": 3,
-      "auto_mode": true,
-      "scenario_mode": "schedule",
-      "temperature_enabled": false,
-      "temperature_on": 30.0,
-      "temperature_off": 29.0,
-      "schedule_enabled": true,
-      "schedule_on": "18:04",
-      "schedule_off": "18:05",
-      "schedule_days": [
-        "tue"
-      ]
-    },
-    "config_topic": "smarthome/device/fan01/config",
-    "version": 11,
-    "last_seen": "192.168.1.78",
-    "synced_version": 11,
-    "device_version": 11,
-    "sync_status": "APPLIED",
-    "ip": "192.168.1.78"
-  },
-  "ESP32-RELAY-01": {
-    "device_id": "ESP32-RELAY-01",
-    "type": "relay",
-    "name": "ESP32-RELAY-01",
-    "room": "",
-    "settings": {
-      "rooms": [],
-      "channels": [
-        {
-          "id": 1,
-          "name": "Relay 1",
-          "room": "",
-          "mode": "manual",
-          "default_state": false,
-          "schedule_on": "18:03",
-          "schedule_off": "18:04",
-          "schedule_days": [
-            "tue"
-          ]
-        },
-        {
-          "id": 2,
-          "name": "Relay 2",
-          "room": "",
-          "mode": "manual",
-          "default_state": false,
-          "schedule_on": "18:03",
-          "schedule_off": "18:04",
-          "schedule_days": [
-            "tue"
-          ]
-        },
-        {
-          "id": 3,
-          "name": "Relay 3",
-          "room": "",
-          "mode": "manual",
-          "default_state": false,
-          "schedule_on": "08:00",
-          "schedule_off": "22:00",
-          "schedule_days": [
-            "mon",
-            "tue",
-            "wed",
-            "thu",
-            "fri",
-            "sat",
-            "sun"
-          ]
-        },
-        {
-          "id": 4,
-          "name": "Relay 4",
-          "room": "",
-          "mode": "manual",
-          "default_state": false,
-          "schedule_on": "08:00",
-          "schedule_off": "22:00",
-          "schedule_days": [
-            "mon",
-            "tue",
-            "wed",
-            "thu",
-            "fri",
-            "sat",
-            "sun"
-          ]
-        }
-      ]
-    },
-    "config_topic": "smarthome/device/relay01/config",
-    "version": 11,
-    "last_seen": "192.168.1.239",
-    "ip": "192.168.1.239",
-    "device_version": 19,
-    "synced_version": 19,
-    "sync_status": "APPLIED"
-  },
   "ESP32-CAM-01": {
     "device_id": "ESP32-CAM-01",
     "type": "camera",
@@ -120,5 +15,167 @@
     "status_url": "http://192.168.1.252/status",
     "stream_port": 81,
     "http_port": 80
+  },
+  "ESP32-RELAY-01": {
+    "device_id": "ESP32-RELAY-01",
+    "type": "relay",
+    "name": "ESP32-RELAY-01",
+    "room": "",
+    "settings": {
+      "rooms": [],
+      "channels": [
+        {
+          "id": 1,
+          "name": "Relay 1",
+          "room": "",
+          "automation_mode": "manual",
+          "motion": {
+            "sensor_id": "PIR-SR602-01",
+            "gpio": 16,
+            "configured": true,
+            "hold_seconds": 3,
+            "cooldown_seconds": 3
+          },
+          "default_state": false,
+          "schedule_on": "23:15",
+          "schedule_off": "23:16",
+          "schedule_days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat",
+            "sun"
+          ],
+          "mode": "manual"
+        },
+        {
+          "id": 2,
+          "name": "Relay 2",
+          "room": "",
+          "automation_mode": "manual",
+          "motion": {
+            "sensor_id": "PIR-SR602-02",
+            "gpio": 17,
+            "configured": true,
+            "hold_seconds": 3,
+            "cooldown_seconds": 3
+          },
+          "default_state": false,
+          "schedule_on": "23:16",
+          "schedule_off": "23:17",
+          "schedule_days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat",
+            "sun"
+          ],
+          "mode": "manual"
+        },
+        {
+          "id": 3,
+          "name": "Relay 3",
+          "room": "",
+          "automation_mode": "manual",
+          "motion": {
+            "sensor_id": "PIR-SR602-03",
+            "gpio": null,
+            "configured": false,
+            "hold_seconds": 120,
+            "cooldown_seconds": 3
+          },
+          "default_state": false,
+          "schedule_on": "08:00",
+          "schedule_off": "22:00",
+          "schedule_days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat",
+            "sun"
+          ],
+          "mode": "manual"
+        },
+        {
+          "id": 4,
+          "name": "Relay 4",
+          "room": "",
+          "automation_mode": "manual",
+          "motion": {
+            "sensor_id": "PIR-SR602-04",
+            "gpio": null,
+            "configured": false,
+            "hold_seconds": 120,
+            "cooldown_seconds": 3
+          },
+          "default_state": false,
+          "schedule_on": "08:00",
+          "schedule_off": "22:00",
+          "schedule_days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat",
+            "sun"
+          ],
+          "mode": "manual"
+        }
+      ]
+    },
+    "config_topic": "smarthome/device/relay01/config",
+    "version": 26,
+    "last_seen": "192.168.1.239",
+    "device_version": 26,
+    "synced_version": 26,
+    "sync_status": "APPLIED",
+    "ip": "192.168.1.239"
+  },
+  "ESP32-FAN-01": {
+    "device_id": "ESP32-FAN-01",
+    "type": "fan",
+    "name": "ESP32-FAN-01",
+    "room": "",
+    "settings": {
+      "default_level": 0,
+      "auto_mode": false,
+      "scenario_mode": "manual",
+      "temperature_enabled": false,
+      "temperature_on": 30.0,
+      "temperature_off": 29.0,
+      "schedule_enabled": false,
+      "schedule_on": "23:09",
+      "schedule_off": "23:15",
+      "schedule_days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun"
+      ],
+      "motion": {
+        "enabled": false,
+        "sensor_id": "PIR-FAN-01",
+        "gpio": 22,
+        "hold_seconds": 3,
+        "cooldown_seconds": 3
+      }
+    },
+    "config_topic": "smarthome/device/fan01/config",
+    "version": 12,
+    "last_seen": "192.168.1.78",
+    "synced_version": 12,
+    "device_version": 12,
+    "sync_status": "APPLIED",
+    "ip": "192.168.1.78"
   }
 }

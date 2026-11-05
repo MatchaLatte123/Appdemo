@@ -122,6 +122,32 @@ String scheduleOn = "08:00";
 String scheduleOff = "22:00";
 uint8_t scheduleDayMask = 0x7F; // Monday through Sunday
 
+// Motion input is deliberately independent of scenarioMode.
+bool motionEnabled = false;
+String motionSensorId = "PIR-FAN-01";
+int motionGpio = 22;
+uint16_t motionHoldSeconds = 120;
+uint8_t motionCooldownSeconds = 3;
+bool motionRequest = false;
+// Explicit user ON while in Manual mode. The configured default level alone
+// must not start the fan when Motion is enabled.
+bool manualRequest = false;
+unsigned long lastMotionAt = 0;
+unsigned long lastMotionEdgeAt = 0;
+unsigned long lastPirEdgeAt = 0;
+unsigned long pirHighStartedAt = 0;
+bool pirLastState = LOW;
+bool pirRawState = LOW;
+bool pirReady = false;
+bool pirArmed = false;
+volatile bool pirRisingPending = false;
+
+bool wifiConnectPending = false;
+bool wifiAttempted = false;
+bool wifiWasConnected = false;
+unsigned long wifiConnectStartedAt = 0;
+unsigned long lastWiFiAttempt = 0;
+
 int profileVersion = 0;
 
 // =====================================================
@@ -136,6 +162,8 @@ unsigned long lastAnnounce = 0;
 unsigned long lastScenarioCheck = 0;
 
 const unsigned long MQTT_RECONNECT_INTERVAL = 5000;
+const unsigned long WIFI_CONNECT_TIMEOUT = 15000;
+const unsigned long WIFI_RETRY_INTERVAL = 5000;
 const unsigned long TELEMETRY_INTERVAL = 10000;
 const unsigned long ANNOUNCE_INTERVAL = 30000;
 const unsigned long SCENARIO_INTERVAL = 5000;
@@ -145,6 +173,143 @@ const unsigned long SCENARIO_INTERVAL = 5000;
 // =====================================================
 
 void publishStatus();
+void applyScenario();
+
+void ARDUINO_ISR_ATTR pirRisingISR() {
+  pirRisingPending = true;
+}
+
+bool isMotionActive() {
+  return motionEnabled && motionRequest && !quarantined;
+}
+
+void initMotionSensor() {
+  // GPIO22 is the board-wired SR602 input. Do not remap it from profile data.
+  detachInterrupt(digitalPinToInterrupt(22));
+  motionRequest = false;
+  lastMotionAt = 0;
+  lastMotionEdgeAt = 0;
+  lastPirEdgeAt = 0;
+  motionGpio = 22;
+  if (motionEnabled) {
+    pinMode(motionGpio, INPUT);
+    pirRawState = digitalRead(motionGpio);
+    pirLastState = pirRawState;
+    pirHighStartedAt = pirRawState ? millis() : 0;
+    // SR602 can power up with OUT high. Arm only after observing idle LOW.
+    pirArmed = !pirRawState;
+    noInterrupts();
+    pirRisingPending = false;
+    interrupts();
+    attachInterrupt(digitalPinToInterrupt(motionGpio), pirRisingISR, RISING);
+    pirReady = true;
+  } else {
+    pirReady = false;
+    pirArmed = false;
+    pirHighStartedAt = 0;
+    motionRequest = false;
+    noInterrupts();
+    pirRisingPending = false;
+    interrupts();
+  }
+}
+
+bool processMotionSensor() {
+  if (!motionEnabled || motionGpio != 22) {
+    if (motionRequest) {
+      motionRequest = false;
+      return true;
+    }
+    return false;
+  }
+  if (!pirReady) initMotionSensor();
+
+  const unsigned long now = millis();
+  const bool pirState = digitalRead(motionGpio);
+  bool risingPending;
+  noInterrupts();
+  risingPending = pirRisingPending;
+  pirRisingPending = false;
+  interrupts();
+  pirRawState = pirState;
+
+  if (quarantined) {
+    bool changed = motionRequest;
+    motionRequest = false;
+    pirLastState = pirState;
+    pirArmed = !pirState;
+    pirHighStartedAt = pirState ? now : 0;
+    return changed;
+  }
+
+  if (!pirArmed) {
+    if (risingPending) {
+      // An interrupt confirms LOW->HIGH even if the main loop missed the LOW.
+      pirArmed = true;
+    } else {
+      pirLastState = pirState;
+      if (!pirState) {
+        pirArmed = true;
+        pirHighStartedAt = 0;
+        Serial.println("[MOTION] PIR armed after idle LOW");
+      }
+      return false;
+    }
+  }
+
+  bool changed = false;
+  const bool rawRising = pirState == HIGH && pirLastState == LOW;
+  const bool risingEdge = risingPending || rawRising;
+  if (risingEdge) {
+    lastPirEdgeAt = now;
+  }
+  const bool acceptedRising = risingEdge &&
+      (!lastMotionEdgeAt || now - lastMotionEdgeAt >= (unsigned long)motionCooldownSeconds * 1000UL);
+  if (acceptedRising) {
+    lastMotionEdgeAt = now;
+    Serial.printf("[MOTION] %s detected, hold=%u s\n", motionSensorId.c_str(), motionHoldSeconds);
+  }
+
+  // Keep Motion active for the entire sensor HIGH level, then start the
+  // configured hold timer after OUT returns LOW. The ISR preserves short
+  // rising pulses while Wi-Fi/MQTT code is busy.
+  if (pirState == HIGH || acceptedRising) {
+    if (!motionRequest) changed = true;
+    motionRequest = true;
+    if (pirState == HIGH || acceptedRising) lastMotionAt = now;
+    if (rawRising || (risingPending && pirState == HIGH) || !pirHighStartedAt) {
+      pirHighStartedAt = now;
+    }
+  } else if (motionRequest && now - lastMotionAt >= (unsigned long)motionHoldSeconds * 1000UL) {
+    motionRequest = false;
+    changed = true;
+    Serial.println("[MOTION] hold expired");
+  }
+  if (pirState == LOW) pirHighStartedAt = 0;
+  pirLastState = pirState;
+  return changed;
+}
+
+void appendMotionStatus(JsonDocument &d) {
+  d["motion_enabled"] = motionEnabled;
+  d["motion_sensor_id"] = motionSensorId;
+  d["motion_available"] = motionEnabled && motionGpio == 22 && pirReady;
+  d["motion_active"] = isMotionActive();
+  unsigned long remaining = 0;
+  if (motionRequest && motionHoldSeconds > 0) {
+    unsigned long elapsed = (millis() - lastMotionAt) / 1000UL;
+    if (elapsed < motionHoldSeconds) remaining = motionHoldSeconds - elapsed;
+  }
+  d["motion_remaining_seconds"] = remaining;
+  d["pir_gpio_high"] = pirRawState;
+  d["pir_armed"] = pirArmed;
+  d["pir_last_rising_age_seconds"] = lastPirEdgeAt
+      ? (millis() - lastPirEdgeAt) / 1000UL
+      : 0;
+  d["pir_high_seconds"] = pirRawState && pirHighStartedAt
+      ? (millis() - pirHighStartedAt) / 1000UL
+      : 0;
+}
 
 // =====================================================
 // SAVE PROFILE
@@ -205,6 +370,11 @@ void saveProfile() {
       scheduleOff
   );
   prefs.putUChar("sdays", scheduleDayMask);
+  prefs.putBool("men", motionEnabled);
+  prefs.putString("msid", motionSensorId);
+  prefs.putUChar("mgpio", (uint8_t)motionGpio);
+  prefs.putUShort("mhold", motionHoldSeconds);
+  prefs.putUChar("mcool", motionCooldownSeconds);
 
   prefs.putInt(
       "ver",
@@ -301,6 +471,16 @@ void loadProfile() {
           "22:00"
       );
   scheduleDayMask = prefs.getUChar("sdays", 0x7F);
+  motionEnabled = prefs.getBool("men", false);
+  motionSensorId = prefs.getString("msid", "PIR-FAN-01");
+  motionGpio = prefs.getUChar("mgpio", 22);
+  motionHoldSeconds = constrain(prefs.getUShort("mhold", 120), 1, 3600);
+  motionCooldownSeconds = constrain(prefs.getUChar("mcool", 3), 0, 60);
+  if (motionGpio != 22) {
+    Serial.printf("[MOTION] Unsupported GPIO %d; disabling Motion (hardware pin is GPIO22)\n", motionGpio);
+    motionEnabled = false;
+    motionGpio = 22;
+  }
 
   profileVersion =
       prefs.getInt(
@@ -623,11 +803,8 @@ void applyScenario() {
     return;
   }
 
-  if (scenarioMode == "manual") {
-    return;
-  }
-
-  bool shouldRun = false;
+  bool shouldRun = scenarioMode == "manual" &&
+      (motionEnabled ? manualRequest : defaultLevel > 0);
 
   bool timeOK = true;
   bool tempOK = true;
@@ -645,12 +822,7 @@ void applyScenario() {
   ) {
 
     if (isnan(temperature)) {
-
-      Serial.println(
-          "[SCENARIO] Cannot evaluate temperature"
-      );
-
-      return;
+      Serial.println("[SCENARIO] Temperature unavailable; preserving hysteresis state");
     }
 
     // Hysteresis
@@ -658,7 +830,7 @@ void applyScenario() {
     // ON  >= tempOn
     // OFF <= tempOff
 
-    if (
+    if (!isnan(temperature) &&
         !autoFanState &&
         temperature >= tempOn
     ) {
@@ -666,7 +838,7 @@ void applyScenario() {
       autoFanState = true;
 
     }
-    else if (
+    else if (!isnan(temperature) &&
         autoFanState &&
         temperature <= tempOff
     ) {
@@ -699,8 +871,7 @@ void applyScenario() {
       scenarioMode == "temperature"
   ) {
 
-    shouldRun =
-        tempOK;
+    shouldRun = tempOK;
 
   }
   else if (
@@ -718,6 +889,14 @@ void applyScenario() {
     shouldRun =
         timeOK &&
         tempOK;
+  }
+
+  // In automatic modes, enabled Motion gates the scenario request. In Manual,
+  // Motion remains an additional request and manual level is retained for restore.
+  if (motionEnabled && scenarioMode != "manual") {
+    shouldRun = shouldRun && isMotionActive();
+  } else {
+    shouldRun = shouldRun || isMotionActive();
   }
 
   // ---------------------------------------------------
@@ -847,7 +1026,9 @@ void publishStatus() {
   d["scenario_mode"] =
       scenarioMode;
 
-  char out[700];
+  appendMotionStatus(d);
+
+  char out[900];
 
   serializeJson(
       d,
@@ -899,7 +1080,9 @@ void publishTelemetry() {
   d["fan_percent"] =
       currentPercent;
 
-  char out[350];
+  appendMotionStatus(d);
+
+  char out[550];
 
   serializeJson(
       d,
@@ -1066,6 +1249,20 @@ void resetProfileToDefault() {
   scheduleOn = "08:00";
   scheduleOff = "22:00";
   scheduleDayMask = 0x7F;
+  motionEnabled = false;
+  motionSensorId = "PIR-FAN-01";
+  motionGpio = 22;
+  motionHoldSeconds = 120;
+  motionCooldownSeconds = 3;
+  motionRequest = false;
+  manualRequest = false;
+  pirArmed = false;
+  pirRawState = LOW;
+  lastPirEdgeAt = 0;
+  pirHighStartedAt = 0;
+  lastMotionAt = 0;
+  lastMotionEdgeAt = 0;
+  initMotionSensor();
 
   // Reset profile version so the next Add + Sync starts at version 1.
   profileVersion = 0;
@@ -1094,6 +1291,9 @@ void resetProfileToDefault() {
 void handleConfig(
     String message
 ) {
+
+  const bool previousMotionEnabled = motionEnabled;
+  const String previousScenarioMode = scenarioMode;
 
   Serial.printf(
       "[CONFIG] Received profile: %s\n",
@@ -1298,6 +1498,27 @@ void handleConfig(
     }
   } else scheduleDayMask = 0x7F;
 
+  JsonObject motion = d["settings"]["motion"];
+  if (!motion.isNull()) {
+    if (motion["enabled"].is<bool>()) motionEnabled = motion["enabled"].as<bool>();
+    if (motion["sensor_id"].is<const char*>()) motionSensorId = motion["sensor_id"].as<String>();
+    int requestedGpio = motion["gpio"] | 22;
+    motionGpio = requestedGpio;
+    motionHoldSeconds = constrain(motion["hold_seconds"] | 120, 1, 3600);
+    motionCooldownSeconds = constrain(motion["cooldown_seconds"] | 3, 0, 60);
+    if (motionGpio != 22) {
+      Serial.printf("[CONFIG] Motion GPIO %d rejected; Fan PIR is wired to GPIO22\n", motionGpio);
+      motionEnabled = false;
+      motionGpio = 22;
+    }
+  }
+  if (!motionEnabled) motionRequest = false;
+  if (!previousMotionEnabled && motionEnabled) manualRequest = false;
+  if (scenarioMode != previousScenarioMode) manualRequest = false;
+  if (motionEnabled != previousMotionEnabled || !pirReady) {
+    initMotionSensor();
+  }
+
   // ---------------------------------------------------
   // VALIDATE SCENARIO MODE
   // ---------------------------------------------------
@@ -1315,6 +1536,7 @@ void handleConfig(
 
     scenarioMode =
         "manual";
+
   }
 
   // scenario_mode is authoritative
@@ -1361,19 +1583,7 @@ void handleConfig(
   // APPLY IMMEDIATELY
   // ---------------------------------------------------
 
-  if (
-      scenarioMode == "manual"
-  ) {
-
-    setFanLevel(
-        defaultLevel
-    );
-
-  }
-  else {
-
-    applyScenario();
-  }
+  applyScenario();
 
   // ---------------------------------------------------
   // ACK
@@ -1443,6 +1653,7 @@ void handleFanCommand(
 
     int level =
         d["level"] | 0;
+    level = constrain(level, 0, 3);
 
     Serial.printf(
         "[CONTROL] Manual SET_LEVEL=%d -> scenarioMode=manual\n",
@@ -1451,6 +1662,9 @@ void handleFanCommand(
 
     scenarioMode =
         "manual";
+
+    defaultLevel = level;
+    manualRequest = level > 0;
 
     setFanLevel(
         level
@@ -1478,6 +1692,9 @@ void handleFanCommand(
 
     scenarioMode =
         "manual";
+
+    defaultLevel = 0;
+    manualRequest = false;
 
     setFanLevel(
         0
@@ -1531,6 +1748,12 @@ void handleSecurity(
     quarantined =
         true;
 
+    motionRequest = false;
+    pirArmed = false;
+    noInterrupts();
+    pirRisingPending = false;
+    interrupts();
+
     securityState =
         "QUARANTINED";
 
@@ -1556,19 +1779,7 @@ void handleSecurity(
     securityState =
         "NORMAL";
 
-    if (
-        scenarioMode == "manual"
-    ) {
-
-      setFanLevel(
-          defaultLevel
-      );
-
-    }
-    else {
-
-      applyScenario();
-    }
+    applyScenario();
   }
 
   // ---------------------------------------------------
@@ -1698,81 +1909,49 @@ void callback(
 // =====================================================
 
 bool connectWiFi() {
+  const unsigned long now = millis();
 
-  WiFi.mode(
-      WIFI_STA
-  );
-
-  WiFi.begin(
-      WIFI_SSID,
-      WIFI_PASSWORD
-  );
-
-  int retry = 0;
-
-  while (
-      WiFi.status() != WL_CONNECTED &&
-      retry++ < 30
-  ) {
-
-    delay(500);
-
-    Serial.print(
-        '.'
-    );
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiConnectPending = false;
+    if (!wifiWasConnected) {
+      Serial.printf(
+          "[WIFI] IP=%s Gateway=%s RSSI=%d\n",
+          WiFi.localIP().toString().c_str(),
+          WiFi.gatewayIP().toString().c_str(),
+          WiFi.RSSI()
+      );
+    }
+    wifiWasConnected = true;
+    return true;
   }
 
-  Serial.println();
+  if (wifiWasConnected) {
+    Serial.println("[WIFI] Connection lost");
+    wifiWasConnected = false;
+    wifiConnectPending = false;
+  }
 
-  if (
-      WiFi.status() != WL_CONNECTED
-  ) {
+  if (wifiConnectPending) {
+    if (now - wifiConnectStartedAt < WIFI_CONNECT_TIMEOUT) return false;
+    Serial.println("[WIFI] Connection attempt timed out");
+    wifiConnectPending = false;
+  }
 
-    Serial.println(
-        "[WIFI] FAILED"
-    );
-
+  if (wifiAttempted && now - lastWiFiAttempt < WIFI_RETRY_INTERVAL) {
     return false;
   }
 
-  Serial.printf(
-      "[WIFI] IP=%s Gateway=%s RSSI=%d\n",
-      WiFi.localIP().toString().c_str(),
-      WiFi.gatewayIP().toString().c_str(),
-      WiFi.RSSI()
-  );
-
-  return true;
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  wifiAttempted = true;
+  wifiConnectPending = true;
+  wifiConnectStartedAt = now;
+  lastWiFiAttempt = now;
+  Serial.println("[WIFI] Connection attempt started");
+  return false;
 }
 
 // =====================================================
-// TEST MQTT SERVER
-// =====================================================
-
-bool testMQTTServer() {
-
-  WiFiClient test;
-
-  bool ok =
-      test.connect(
-          MQTT_SERVER,
-          MQTT_PORT
-      );
-
-  test.stop();
-
-  Serial.printf(
-      "[NETWORK] %s %s:%d\n",
-      ok
-          ? "TCP OK"
-          : "TCP FAILED",
-      MQTT_SERVER,
-      MQTT_PORT
-  );
-
-  return ok;
-}
-
 // =====================================================
 // CONNECT MQTT
 // =====================================================
@@ -1781,13 +1960,6 @@ bool connectMQTT() {
 
   if (
       WiFi.status() != WL_CONNECTED
-  ) {
-
-    return false;
-  }
-
-  if (
-      !testMQTTServer()
   ) {
 
     return false;
@@ -1883,6 +2055,7 @@ void setup() {
   // ---------------------------------------------------
 
   loadProfile();
+  initMotionSensor();
 
   // ---------------------------------------------------
   // L298N
@@ -1955,6 +2128,9 @@ void setup() {
       MQTT_PORT
   );
 
+  // Bound the MQTT handshake response wait during reconnects.
+  mqttClient.setSocketTimeout(2);
+
   mqttClient.setCallback(
       callback
   );
@@ -1995,10 +2171,11 @@ void setup() {
   if (
       scenarioMode == "manual"
   ) {
-
-    setFanLevel(
-        defaultLevel
-    );
+    if (motionEnabled) {
+      setFanLevel(manualRequest ? defaultLevel : 0);
+    } else {
+      setFanLevel(defaultLevel);
+    }
   }
 }
 
@@ -2008,16 +2185,17 @@ void setup() {
 
 void loop() {
 
+  if (processMotionSensor()) {
+    applyScenario();
+    publishStatus();
+    publishTelemetry();
+  }
+
   // ---------------------------------------------------
   // WIFI
   // ---------------------------------------------------
 
-  if (
-      WiFi.status() != WL_CONNECTED
-  ) {
-
-    connectWiFi();
-  }
+  connectWiFi();
 
   // ---------------------------------------------------
   // MQTT RECONNECT

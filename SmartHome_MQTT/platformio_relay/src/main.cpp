@@ -10,6 +10,8 @@ void publishStatus();
 void publishTelemetry();
 void publishRegister();
 void publishConfigAck(const char* status);
+void setRelayState(int channel, bool state, bool publish = true);
+void applySchedule();
 
 // =====================================================
 // WIFI
@@ -75,7 +77,12 @@ int profileVersion = 0;
 struct ChannelProfile {
   String name;
   String room;
-  String mode;          // manual | schedule
+  String automationMode; // manual | motion | schedule | schedule_motion
+  String sensorId;
+  int motionGpio;
+  bool motionConfigured;
+  uint16_t holdSeconds;
+  uint16_t cooldownSeconds;
   bool defaultState;
   String scheduleOn;
   String scheduleOff;
@@ -83,6 +90,18 @@ struct ChannelProfile {
 };
 
 ChannelProfile channels[4];
+bool scheduleRequest[4] = {false, false, false, false};
+bool motionRequest[4] = {false, false, false, false};
+bool manualOverrideActive[4] = {false, false, false, false};
+bool manualOverrideState[4] = {false, false, false, false};
+unsigned long manualOverrideUntil[4] = {0, 0, 0, 0};
+unsigned long lastMotionAt[4] = {0, 0, 0, 0};
+unsigned long lastMotionEdgeAt[4] = {0, 0, 0, 0};
+bool pirLastState[4] = {false, false, false, false};
+bool pirReady[4] = {false, false, false, false};
+const char* PIR_IDS[4] = {"PIR-SR602-01", "PIR-SR602-02", "PIR-SR602-03", "PIR-SR602-04"};
+const int PIR_GPIOS[4] = {16, 17, -1, -1};
+int pirActiveGpio[4] = {-1, -1, -1, -1};
 
 unsigned long lastMqttReconnect = 0;
 unsigned long lastTelemetry = 0;
@@ -100,11 +119,114 @@ const unsigned long SCENARIO_INTERVAL = 5000;
 void setDefaultChannel(int index) {
   channels[index].name = "Relay " + String(index + 1);
   channels[index].room = "";
-  channels[index].mode = "manual";
+  channels[index].automationMode = "manual";
+  channels[index].sensorId = PIR_IDS[index];
+  channels[index].motionGpio = PIR_GPIOS[index];
+  channels[index].motionConfigured = false;
+  channels[index].holdSeconds = 120;
+  channels[index].cooldownSeconds = 3;
   channels[index].defaultState = false;
   channels[index].scheduleOn = "08:00";
   channels[index].scheduleOff = "22:00";
   channels[index].scheduleDayMask = 0x7F;
+}
+
+int gpioForPir(const String& sensorId) {
+  for (int i = 0; i < 4; ++i) if (sensorId == PIR_IDS[i]) return PIR_GPIOS[i];
+  return -1;
+}
+
+bool pirConfigured(int index) {
+  if (index < 0 || index >= 4 || !channels[index].motionConfigured) return false;
+  int assignedGpio = gpioForPir(channels[index].sensorId);
+  return assignedGpio >= 0 && channels[index].motionGpio == assignedGpio;
+}
+
+void configurePirInputs() {
+  for (int i = 0; i < 4; ++i) {
+    if (pirReady[i] && pirActiveGpio[i] >= 0) pinMode(pirActiveGpio[i], INPUT);
+    pirReady[i] = false;
+    pirActiveGpio[i] = -1;
+    if ((channels[i].automationMode == "motion" || channels[i].automationMode == "schedule_motion") && pirConfigured(i)) {
+      pinMode(channels[i].motionGpio, INPUT);
+      pirActiveGpio[i] = channels[i].motionGpio;
+      pirLastState[i] = digitalRead(channels[i].motionGpio) == HIGH;
+      pirReady[i] = true;
+    }
+    motionRequest[i] = false;
+    lastMotionAt[i] = 0;
+    lastMotionEdgeAt[i] = 0;
+  }
+}
+
+void applyTargetStates() {
+  bool changed = false;
+  unsigned long now = millis();
+  for (int i = 0; i < 4; ++i) {
+    if (quarantined) {
+      if (relayState[i]) { setRelayState(i + 1, false, false); changed = true; }
+      continue;
+    }
+    bool target = relayState[i];
+    if (channels[i].automationMode == "manual") continue;
+    bool requested = false;
+    if (channels[i].automationMode == "motion") requested = motionRequest[i];
+    else if (channels[i].automationMode == "schedule") requested = scheduleRequest[i];
+    // In schedule_motion, scheduleRequest gates PIR processing; it is not itself an ON request.
+    else if (channels[i].automationMode == "schedule_motion") requested = motionRequest[i];
+    if (manualOverrideActive[i] && (long)(now - manualOverrideUntil[i]) < 0) {
+      target = manualOverrideState[i];
+    } else {
+      manualOverrideActive[i] = false;
+      target = requested;
+    }
+    if (target != relayState[i]) { setRelayState(i + 1, target, false); changed = true; }
+  }
+  if (changed) publishStatus();
+}
+
+void applyManualCommand(int channel, bool state) {
+  if (channel < 1 || channel > 4 || quarantined) return;
+  int i = channel - 1;
+  if (channels[i].automationMode == "manual") {
+    setRelayState(channel, state);
+  } else {
+    manualOverrideActive[i] = true;
+    manualOverrideState[i] = state;
+    manualOverrideUntil[i] = millis() + 30000UL;
+    setRelayState(channel, state);
+  }
+}
+
+void processPirInputs() {
+  unsigned long now = millis();
+  for (int i = 0; i < 4; ++i) {
+    if (quarantined) {
+      motionRequest[i] = false;
+      if (pirReady[i]) pirLastState[i] = digitalRead(channels[i].motionGpio) == HIGH;
+      continue;
+    }
+    bool motionMode = channels[i].automationMode == "motion" || channels[i].automationMode == "schedule_motion";
+    bool motionAllowed = channels[i].automationMode == "motion" ||
+      (channels[i].automationMode == "schedule_motion" && scheduleRequest[i]);
+    if (!pirReady[i] || !motionMode || !motionAllowed) {
+      if (channels[i].automationMode == "schedule_motion" && !scheduleRequest[i]) motionRequest[i] = false;
+      if (pirReady[i]) pirLastState[i] = digitalRead(channels[i].motionGpio) == HIGH;
+      continue;
+    }
+    bool current = digitalRead(channels[i].motionGpio) == HIGH;
+    if (current && !pirLastState[i] && (!lastMotionEdgeAt[i] || now - lastMotionEdgeAt[i] >= (unsigned long)channels[i].cooldownSeconds * 1000UL)) {
+      lastMotionEdgeAt[i] = now;
+      lastMotionAt[i] = now;
+      motionRequest[i] = true;
+      Serial.printf("[MOTION] CH%d movement detected\n", i + 1);
+    }
+    pirLastState[i] = current;
+    if (motionRequest[i] && now - lastMotionAt[i] >= (unsigned long)channels[i].holdSeconds * 1000UL) {
+      motionRequest[i] = false;
+      Serial.printf("[MOTION] CH%d hold expired\n", i + 1);
+    }
+  }
 }
 
 void setDefaultProfile() {
@@ -122,7 +244,7 @@ void setDefaultProfile() {
 // =====================================================
 // RELAY OUTPUT
 // =====================================================
-void setRelayState(int channel, bool state, bool publish = true) {
+void setRelayState(int channel, bool state, bool publish) {
   if (channel < 1 || channel > 4) return;
 
   int index = channel - 1;
@@ -203,7 +325,14 @@ void saveProfile() {
     c["id"] = i + 1;
     c["name"] = channels[i].name;
     c["room"] = channels[i].room;
-    c["mode"] = channels[i].mode;
+    c["automation_mode"] = channels[i].automationMode;
+    c["mode"] = (channels[i].automationMode == "schedule" || channels[i].automationMode == "schedule_motion") ? "schedule" : "manual";
+    JsonObject motion = c["motion"].to<JsonObject>();
+    motion["sensor_id"] = channels[i].sensorId;
+    motion["gpio"] = channels[i].motionGpio;
+    motion["configured"] = channels[i].motionConfigured;
+    motion["hold_seconds"] = channels[i].holdSeconds;
+    motion["cooldown_seconds"] = channels[i].cooldownSeconds;
     c["default_state"] = channels[i].defaultState;
     c["schedule_on"] = channels[i].scheduleOn;
     c["schedule_off"] = channels[i].scheduleOff;
@@ -259,7 +388,8 @@ void loadProfile() {
       JsonObject c = arr[i];
       channels[i].name = c["name"] | channels[i].name;
       channels[i].room = c["room"] | "";
-      channels[i].mode = c["mode"] | "manual";
+      String legacyMode = c["mode"] | "manual";
+      channels[i].automationMode = c["automation_mode"] | (legacyMode == "schedule" ? "schedule" : "manual");
       channels[i].defaultState = c["default_state"] | false;
       channels[i].scheduleOn = c["schedule_on"] | "08:00";
       channels[i].scheduleOff = c["schedule_off"] | "22:00";
@@ -269,9 +399,13 @@ void loadProfile() {
         const char* names[] = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"};
         for (JsonVariant day : days) for (int d = 0; d < 7; d++) if (day == names[d]) channels[i].scheduleDayMask |= (1u << d);
       }
-      if (channels[i].mode != "manual" && channels[i].mode != "schedule") {
-        channels[i].mode = "manual";
-      }
+      JsonObject motion = c["motion"].as<JsonObject>();
+      channels[i].sensorId = motion["sensor_id"] | channels[i].sensorId;
+      channels[i].motionGpio = motion["gpio"] | channels[i].motionGpio;
+      channels[i].motionConfigured = motion["configured"] | false;
+      channels[i].holdSeconds = constrain((int)(motion["hold_seconds"] | 120), 1, 3600);
+      channels[i].cooldownSeconds = constrain((int)(motion["cooldown_seconds"] | 3), 0, 60);
+      if (channels[i].automationMode != "manual" && channels[i].automationMode != "motion" && channels[i].automationMode != "schedule" && channels[i].automationMode != "schedule_motion") channels[i].automationMode = "manual";
     }
   }
 
@@ -281,7 +415,7 @@ void loadProfile() {
       i + 1,
       channels[i].name.c_str(),
       channels[i].room.c_str(),
-      channels[i].mode.c_str(),
+      channels[i].automationMode.c_str(),
       channels[i].defaultState ? "ON" : "OFF",
       channels[i].scheduleOn.c_str(),
       channels[i].scheduleOff.c_str());
@@ -289,17 +423,13 @@ void loadProfile() {
 }
 
 void applyInitialProfile() {
-  for (int i = 0; i < 4; i++) {
-    relayState[i] = false;
-  }
-
   if (quarantined) {
     setAllRelayState(false);
     return;
   }
 
   for (int i = 0; i < 4; i++) {
-    if (channels[i].mode == "manual") {
+    if (channels[i].automationMode == "manual") {
       setRelayState(i + 1, channels[i].defaultState, false);
     }
   }
@@ -342,8 +472,15 @@ void publishStatus() {
     c["id"] = i + 1;
     c["name"] = channels[i].name;
     c["room"] = channels[i].room;
-    c["mode"] = channels[i].mode;
+    c["automation_mode"] = channels[i].automationMode;
     c["state"] = relayState[i];
+    JsonObject motion = c["motion"].to<JsonObject>();
+    motion["sensor_id"] = channels[i].sensorId;
+    motion["gpio"] = channels[i].motionGpio;
+    motion["active"] = motionRequest[i];
+    motion["available"] = pirConfigured(i);
+    motion["remaining_seconds"] = motionRequest[i] && millis() - lastMotionAt[i] < (unsigned long)channels[i].holdSeconds * 1000UL
+      ? (unsigned long)(channels[i].holdSeconds - (millis() - lastMotionAt[i]) / 1000UL) : 0;
   }
 
   char out[1800];
@@ -385,6 +522,7 @@ void publishRegister() {
   d["capabilities"][1] = "manual";
   d["capabilities"][2] = "schedule";
   d["capabilities"][3] = "channel_rooms";
+  d["capabilities"][4] = "motion_automation";
 
   char out[1200];
   serializeJson(d, out, sizeof(out));
@@ -460,7 +598,8 @@ void handleConfig(String message) {
     String defaultChannelName = String("Relay ") + String(i + 1);
     channels[i].name = c["name"] | defaultChannelName;
     channels[i].room = c["room"] | "";
-    channels[i].mode = c["mode"] | "manual";
+    String legacyMode = c["mode"] | "manual";
+    channels[i].automationMode = c["automation_mode"] | (legacyMode == "schedule" ? "schedule" : "manual");
     channels[i].defaultState = c["default_state"] | false;
     channels[i].scheduleOn = c["schedule_on"] | "08:00";
     channels[i].scheduleOff = c["schedule_off"] | "22:00";
@@ -471,14 +610,20 @@ void handleConfig(String message) {
       for (JsonVariant day : days) for (int d = 0; d < 7; d++) if (day == names[d]) channels[i].scheduleDayMask |= (1u << d);
     } else channels[i].scheduleDayMask = 0x7F;
 
-    if (channels[i].mode != "manual" && channels[i].mode != "schedule") {
-      channels[i].mode = "manual";
-    }
+    JsonObject motion = c["motion"].as<JsonObject>();
+    channels[i].sensorId = motion["sensor_id"] | channels[i].sensorId;
+    channels[i].motionGpio = motion["gpio"] | channels[i].motionGpio;
+    channels[i].motionConfigured = motion["configured"] | false;
+    channels[i].holdSeconds = constrain((int)(motion["hold_seconds"] | 120), 1, 3600);
+    channels[i].cooldownSeconds = constrain((int)(motion["cooldown_seconds"] | 3), 0, 60);
+    if (channels[i].automationMode != "manual" && channels[i].automationMode != "motion" && channels[i].automationMode != "schedule" && channels[i].automationMode != "schedule_motion") channels[i].automationMode = "manual";
   }
 
   profileVersion = version;
   saveProfile();
+  configurePirInputs();
   applyInitialProfile();
+  applySchedule();
 
   publishConfigAck("APPLIED");
   publishStatus();
@@ -499,7 +644,7 @@ void handleRelayCommand(String message) {
     if (strcmp(action, "SET_CHANNEL") == 0) {
       int channel = d["channel"] | 0;
       bool state = d["state"] | false;
-      setRelayState(channel, state);
+      applyManualCommand(channel, state);
       publishStatus();
       publishTelemetry();
       return;
@@ -507,23 +652,23 @@ void handleRelayCommand(String message) {
 
     if (strcmp(action, "SET_ALL") == 0) {
       bool state = d["state"] | false;
-      setAllRelayState(state);
+      for (int i = 1; i <= 4; ++i) applyManualCommand(i, state);
       publishStatus();
       publishTelemetry();
       return;
     }
 
     // Optional simple action compatibility.
-    if (strcmp(action, "RELAY1_ON") == 0) { setRelayState(1, true); }
-    else if (strcmp(action, "RELAY1_OFF") == 0) { setRelayState(1, false); }
-    else if (strcmp(action, "RELAY2_ON") == 0) { setRelayState(2, true); }
-    else if (strcmp(action, "RELAY2_OFF") == 0) { setRelayState(2, false); }
-    else if (strcmp(action, "RELAY3_ON") == 0) { setRelayState(3, true); }
-    else if (strcmp(action, "RELAY3_OFF") == 0) { setRelayState(3, false); }
-    else if (strcmp(action, "RELAY4_ON") == 0) { setRelayState(4, true); }
-    else if (strcmp(action, "RELAY4_OFF") == 0) { setRelayState(4, false); }
-    else if (strcmp(action, "ALL_ON") == 0) { setAllRelayState(true); }
-    else if (strcmp(action, "ALL_OFF") == 0) { setAllRelayState(false); }
+    if (strcmp(action, "RELAY1_ON") == 0) { applyManualCommand(1, true); }
+    else if (strcmp(action, "RELAY1_OFF") == 0) { applyManualCommand(1, false); }
+    else if (strcmp(action, "RELAY2_ON") == 0) { applyManualCommand(2, true); }
+    else if (strcmp(action, "RELAY2_OFF") == 0) { applyManualCommand(2, false); }
+    else if (strcmp(action, "RELAY3_ON") == 0) { applyManualCommand(3, true); }
+    else if (strcmp(action, "RELAY3_OFF") == 0) { applyManualCommand(3, false); }
+    else if (strcmp(action, "RELAY4_ON") == 0) { applyManualCommand(4, true); }
+    else if (strcmp(action, "RELAY4_OFF") == 0) { applyManualCommand(4, false); }
+    else if (strcmp(action, "ALL_ON") == 0) { for (int i=1;i<=4;i++) applyManualCommand(i, true); }
+    else if (strcmp(action, "ALL_OFF") == 0) { for (int i=1;i<=4;i++) applyManualCommand(i, false); }
     else return;
 
     publishStatus();
@@ -532,16 +677,16 @@ void handleRelayCommand(String message) {
   }
 
   // Original plain-text command compatibility.
-  if (message == "RELAY1_ON") setRelayState(1, true);
-  else if (message == "RELAY1_OFF") setRelayState(1, false);
-  else if (message == "RELAY2_ON") setRelayState(2, true);
-  else if (message == "RELAY2_OFF") setRelayState(2, false);
-  else if (message == "RELAY3_ON") setRelayState(3, true);
-  else if (message == "RELAY3_OFF") setRelayState(3, false);
-  else if (message == "RELAY4_ON") setRelayState(4, true);
-  else if (message == "RELAY4_OFF") setRelayState(4, false);
-  else if (message == "ALL_ON") setAllRelayState(true);
-  else if (message == "ALL_OFF") setAllRelayState(false);
+  if (message == "RELAY1_ON") applyManualCommand(1, true);
+  else if (message == "RELAY1_OFF") applyManualCommand(1, false);
+  else if (message == "RELAY2_ON") applyManualCommand(2, true);
+  else if (message == "RELAY2_OFF") applyManualCommand(2, false);
+  else if (message == "RELAY3_ON") applyManualCommand(3, true);
+  else if (message == "RELAY3_OFF") applyManualCommand(3, false);
+  else if (message == "RELAY4_ON") applyManualCommand(4, true);
+  else if (message == "RELAY4_OFF") applyManualCommand(4, false);
+  else if (message == "ALL_ON") { for (int i=1;i<=4;i++) applyManualCommand(i, true); }
+  else if (message == "ALL_OFF") { for (int i=1;i<=4;i++) applyManualCommand(i, false); }
   else return;
 
   publishStatus();
@@ -552,26 +697,12 @@ void handleRelayCommand(String message) {
 // SCHEDULE ENGINE
 // =====================================================
 void applySchedule() {
-  if (quarantined) return;
-
-  bool changed = false;
   for (int i = 0; i < 4; i++) {
-    if (channels[i].mode != "schedule") continue;
-
-    bool shouldOn = isWithinSchedule(channels[i].scheduleOn, channels[i].scheduleOff, channels[i].scheduleDayMask);
-    if (relayState[i] != shouldOn) {
-      Serial.printf("[SCENARIO] CH%d %s -> %s (%s-%s)\n",
-        i + 1,
-        channels[i].name.c_str(),
-        shouldOn ? "ON" : "OFF",
-        channels[i].scheduleOn.c_str(),
-        channels[i].scheduleOff.c_str());
-      setRelayState(i + 1, shouldOn, false);
-      changed = true;
-    }
+    scheduleRequest[i] = (channels[i].automationMode == "schedule" || channels[i].automationMode == "schedule_motion") &&
+      isWithinSchedule(channels[i].scheduleOn, channels[i].scheduleOff, channels[i].scheduleDayMask);
+    if (channels[i].automationMode == "schedule_motion" && !scheduleRequest[i]) motionRequest[i] = false;
   }
-
-  if (changed) publishStatus();
+  applyTargetStates();
 }
 
 // =====================================================
@@ -586,6 +717,10 @@ void handleSecurity(String message) {
   if (strcmp(action, "QUARANTINE") == 0) {
     quarantined = true;
     securityState = "QUARANTINED";
+    for (int i = 0; i < 4; ++i) {
+      motionRequest[i] = false;
+      manualOverrideActive[i] = false;
+    }
     setAllRelayState(false);
   }
   else if (strcmp(action, "RELEASE") == 0) {
@@ -718,7 +853,9 @@ void setup() {
   connectWiFi();
   if (WiFi.status() == WL_CONNECTED) connectMQTT();
 
+  configurePirInputs();
   applyInitialProfile();
+  applySchedule();
 }
 
 // =====================================================
@@ -753,6 +890,9 @@ void loop() {
     lastScenarioCheck = millis();
     applySchedule();
   }
+
+  processPirInputs();
+  applyTargetStates();
 
   delay(1);
 }
