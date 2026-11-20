@@ -449,16 +449,3 @@ For a source-verified architecture guide covering the ESP32-CAM, Recording
 Service, storage lifecycle, API, task startup, and proposed Flutter integration,
 see [Camera System documentation](docs/CAMERA_SYSTEM.md).
 
-## 7. AI Security Collector — Giai đoạn 1
-
-Thư mục `security_service/` chứa dịch vụ thu thập dữ liệu độc lập:
-
-- MQTT Collector nhận status, telemetry, announce/register và security events.
-- Network Collector dùng Scapy/Npcap để thu metadata gói tin và thống kê theo cửa sổ 5 giây, cập nhật mỗi giây.
-- SQLite lưu MQTT events, network windows, danh sách thiết bị và trạng thái collector.
-- Web Dashboard mặc định chạy tại `http://127.0.0.1:8787`.
-- AppDemo có nút kiểm tra trạng thái collector và mở dashboard.
-
-Cài đặt và vận hành xem `security_service/README.md`. Trước khi chạy capture, cài Npcap và chạy service bằng quyền Administrator. Tài khoản MQTT `security_collector` cần quyền subscribe read-only; cấu hình ACL tham khảo nằm tại `security_service/mosquitto_acl.example`.
-
-**Giới hạn Giai đoạn 1:** chưa có AI inference, chưa phát hiện/phân loại tấn công, chưa tự động quarantine. MQTT ACL mẫu chỉ là tài liệu cấu hình; chưa được áp dụng lên broker và chưa thay đổi firmware. Cần tạo tài khoản riêng, cấp credential tương ứng vào từng firmware ở bước migration broker/device, sau khi kiểm tra đúng topic thực tế.
