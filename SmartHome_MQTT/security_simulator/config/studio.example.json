@@ -1,0 +1,7 @@
+{
+  "launcher": "servers.launch.json",
+  "state_path": "security_simulator/state/sessions.sqlite3",
+  "broker_port": 1883,
+  "poll_seconds": 1,
+  "capture_read_timeout_seconds": 90
+}

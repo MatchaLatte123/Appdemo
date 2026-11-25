@@ -1,0 +1,11 @@
+*
+!/.gitignore
+!/rebuild/
+!/rebuild/**
+!/reports/
+!/reports/ciciot2023_rebuild/
+!/reports/ciciot2023_rebuild/*.md
+!/Start_Training_Studio.cmd
+!/requirements-rebuild.txt
+**/__pycache__/
+.pytest_cache/

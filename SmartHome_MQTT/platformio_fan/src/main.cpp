@@ -133,6 +133,11 @@ bool motionRequest = false;
 // Explicit user ON while in Manual mode. The configured default level alone
 // must not start the fan when Motion is enabled.
 bool manualRequest = false;
+constexpr unsigned long MAX_OFF_TIMER_SECONDS = 86400;
+String offTimerId;
+unsigned long offTimerStartedAt = 0;
+unsigned long offTimerDurationMs = 0;
+bool offTimerElapsed = false;
 unsigned long lastMotionAt = 0;
 unsigned long lastMotionEdgeAt = 0;
 unsigned long lastPirEdgeAt = 0;
@@ -1027,6 +1032,7 @@ void publishStatus() {
   d["scenario_mode"] =
       scenarioMode;
 
+  d["off_timer_id"] = offTimerId;
   appendMotionStatus(d);
 
   char out[900];
@@ -1230,6 +1236,8 @@ void publishConfigAck(
 // =====================================================
 
 void resetProfileToDefault() {
+  offTimerId = "";
+  offTimerElapsed = false;
 
   Serial.println("[PROFILE] RESET requested -> restoring default profile");
 
@@ -1237,7 +1245,7 @@ void resetProfileToDefault() {
   deviceName = "Quạt phòng khách";
   roomName = "Phòng khách";
 
-  defaultLevel = 1;
+  defaultLevel = 0;
 
   scenarioMode = "manual";
   autoMode = false;
@@ -1379,6 +1387,12 @@ void handleConfig(
         "IGNORED_OLD_VERSION"
     );
 
+    return;
+  }
+
+  // A retained replay after MQTT reconnect must not undo the timer.
+  if (version == profileVersion && (offTimerId.length() || offTimerElapsed)) {
+    publishConfigAck("APPLIED");
     return;
   }
 
@@ -1572,6 +1586,8 @@ void handleConfig(
   // SAVE
   // ---------------------------------------------------
 
+  offTimerId = "";
+  offTimerElapsed = false;
   profileVersion =
       version;
 
@@ -1606,6 +1622,17 @@ void handleConfig(
 // =====================================================
 // HANDLE FAN COMMAND
 // =====================================================
+
+void stopFanManually() {
+  offTimerId = "";
+  offTimerElapsed = false;
+  scenarioMode = "manual";
+  defaultLevel = 0;
+  manualRequest = false;
+  setFanLevel(0);
+  publishStatus();
+  publishTelemetry();
+}
 
 void handleFanCommand(
     String message
@@ -1645,6 +1672,20 @@ void handleFanCommand(
   // SET LEVEL
   // ---------------------------------------------------
 
+  if (strcmp(action, "SET_OFF_TIMER") == 0) {
+    if (!d["delay_seconds"].is<unsigned long>()) return;
+    unsigned long seconds = d["delay_seconds"].as<unsigned long>();
+    const char* id = d["timer_id"] | "";
+    if (seconds == 0 || seconds > MAX_OFF_TIMER_SECONDS || strlen(id) != 32) return;
+    if (offTimerId != id) {
+      offTimerStartedAt = millis();
+      offTimerDurationMs = seconds * 1000UL;
+      offTimerId = id;
+    }
+    publishStatus();
+    return;
+  }
+
   if (
       strcmp(
           action,
@@ -1652,6 +1693,8 @@ void handleFanCommand(
       ) == 0
   ) {
 
+    offTimerId = "";
+    offTimerElapsed = false;
     int level =
         d["level"] | 0;
     level = constrain(level, 0, 3);
@@ -1687,22 +1730,7 @@ void handleFanCommand(
       ) == 0
   ) {
 
-    Serial.println(
-        "[CONTROL] Manual OFF -> scenarioMode=manual"
-    );
-
-    scenarioMode =
-        "manual";
-
-    defaultLevel = 0;
-    manualRequest = false;
-
-    setFanLevel(
-        0
-    );
-
-    publishStatus();
-    publishTelemetry();
+    stopFanManually();
   }
 }
 
@@ -1749,6 +1777,7 @@ void handleSecurity(
     quarantined =
         true;
 
+    offTimerId = "";
     motionRequest = false;
     pirArmed = false;
     noInterrupts();
@@ -2187,6 +2216,11 @@ void setup() {
 // =====================================================
 
 void loop() {
+
+  if (offTimerId.length() && millis() - offTimerStartedAt >= offTimerDurationMs) {
+    stopFanManually();
+    offTimerElapsed = true;
+  }
 
   if (processMotionSensor()) {
     applyScenario();

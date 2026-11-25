@@ -1,0 +1,20 @@
+{
+  "logs_dir": "%LOCALAPPDATA%/SmartHomeAI/ServerLogs",
+  "startup_timeout_seconds": 45,
+  "video": {
+    "python": "%LOCALAPPDATA%/Programs/Python/Python313/python.exe",
+    "config": "recording_service/config.json",
+    "path_entries": [
+      "%LOCALAPPDATA%/Microsoft/WinGet/Packages/Gyan.FFmpeg.Shared_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-9.0.2-full_build-shared/bin"
+    ]
+  },
+  "ai": {
+    "python": "%LOCALAPPDATA%/Programs/Python/Python313/python.exe",
+    "config": "security_ai_v3/config/ai_server.json",
+    "port": 8767,
+    "live": {
+      "interface": "Ethernet",
+      "host": "192.168.1.130"
+    }
+  }
+}

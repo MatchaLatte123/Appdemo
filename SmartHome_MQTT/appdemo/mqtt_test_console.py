@@ -14,6 +14,11 @@ import numpy as np
 from PIL import Image, ImageTk
 import paho.mqtt.client as mqtt
 
+if __package__:
+    from .security_dashboard import open_dashboard
+else:
+    from security_dashboard import open_dashboard
+
 
 # ============================================================
 # CONFIG
@@ -45,6 +50,48 @@ client = None
 # ============================================================
 
 PROFILE_FILE = Path(__file__).with_name("device_profiles.json")
+automation_profiles = {}
+automation_applied_versions = {}
+
+
+def adopt_automation_profile(device_id):
+    profile = profiles.get(device_id)
+    incoming = automation_profiles.get(device_id)
+    if not profile or not incoming:
+        return
+    version = incoming["version"]
+    if version != automation_applied_versions.get(device_id) or version <= profile.get("version", 0):
+        return
+    profile.update(
+        name=incoming.get("name", profile.get("name", device_id)),
+        room=incoming.get("room", profile.get("room", "")),
+        settings=incoming["settings"],
+        version=version,
+        device_version=version,
+        synced_version=version,
+        sync_status="APPLIED",
+    )
+    save_profiles()
+    refresh_device_list()
+    refresh_device_cards(force=True)
+
+
+def receive_automation_profile(data):
+    device_id = data["device_id"]
+    if data.get("reset_profile"):
+        automation_profiles.pop(device_id, None)
+        automation_applied_versions.pop(device_id, None)
+        return
+    automation_profiles[device_id] = data
+    adopt_automation_profile(device_id)
+
+
+def receive_automation_ack(device_id, version, status):
+    if status == "APPLIED":
+        automation_applied_versions[device_id] = version
+        adopt_automation_profile(device_id)
+    else:
+        automation_applied_versions.pop(device_id, None)
 DISCOVERY_TOPIC = "smarthome/device/announce"
 REGISTER_TOPIC = "smarthome/device/register"
 profiles = {}
@@ -517,6 +564,15 @@ def edit_profile(device_id):
         return
 
     dtype = p.get("type", "unknown")
+    opened_version = p.get("version", 0)
+
+    def profile_is_current():
+        current = profiles.get(device_id)
+        if current is not None and current.get("version", 0) == opened_version:
+            return True
+        messagebox.showwarning("Profile", "Cấu hình đã thay đổi. Hãy mở lại cửa sổ để chỉnh sửa.")
+        return False
+
     dialog = tk.Toplevel(root)
     dialog.title("Device Profile")
     dialog.geometry("1450x720" if dtype == "relay" else ("560x850" if dtype == "fan" else "560x620"))
@@ -674,6 +730,8 @@ def edit_profile(device_id):
         ).pack(anchor="w", padx=15, pady=5)
 
         def save_edit():
+            if not profile_is_current():
+                return
             new_channels = []
             for i, vars_ in enumerate(row_vars, start=1):
                 nvar, rvar, mvar, svar, onvar, offvar, day_vars, hold_var, cooldown_var, motion_selected, sensor_var = vars_
@@ -781,6 +839,8 @@ def edit_profile(device_id):
         ttk.Spinbox(mf, from_=0, to=60, textvariable=motion_cooldown, width=8).grid(row=4, column=1, sticky="w", padx=8)
 
     def save_edit():
+        if not profile_is_current():
+            return
         settings = s.copy()
         if dtype == "fan":
             selected_mode = mode.get().strip()
@@ -2375,10 +2435,36 @@ def message(c, userdata, msg):
             log(f"[DISCOVERY] ERROR: {e}")
         return
 
+    automation_topics = {
+        "relay01": "ESP32-RELAY-01",
+        "fan01": "ESP32-FAN-01",
+    }
+    for short_id, device_id in automation_topics.items():
+        if msg.topic == f"smarthome/device/{short_id}/config":
+            try:
+                data = json.loads(raw)
+                if (
+                    data.get("device_id") == device_id
+                    and (
+                        data.get("reset_profile") is True
+                        or (type(data.get("version")) is int and isinstance(data.get("settings"), dict))
+                    )
+                ):
+                    root.after(0, receive_automation_profile, data)
+            except (AttributeError, ValueError):
+                pass
+            return
+
     if msg.topic.endswith("/config_ack"):
         try:
             data = json.loads(raw)
             did = data.get("device_id")
+            if (
+                did in automation_topics.values()
+                and msg.topic == f"smarthome/device/{device_short_id(did)}/config_ack"
+                and type(data.get("version")) is int
+            ):
+                root.after(0, receive_automation_ack, did, data["version"], data.get("status"))
             if did in profiles:
                 version = int(data.get("version", profiles[did].get("version", 0)))
                 profiles[did]["synced_version"] = version
@@ -2810,6 +2896,8 @@ ttk.Label(
 # ============================================================
 # MQTT BROKER
 # ============================================================
+
+ttk.Button(head, text="AI Security", command=lambda: open_dashboard(root)).pack(side="right")
 
 cf = ttk.LabelFrame(
     content_frame,

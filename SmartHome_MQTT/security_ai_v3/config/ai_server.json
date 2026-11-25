@@ -1,0 +1,47 @@
+{
+  "cic_input_probe": true,
+  "xgboost_shadow": {
+    "run_id": "70aea805b30a4c1cb918b6e95b3c1d0f",
+    "sha256": "7c1fb515944e68e1803df9c1c94465e6ef8656d59b77ee008e04912d94587de9",
+    "dataset_version": "cic-rebuild-2",
+    "artifact": "security_ai_v2/work_70_15_15/runs/70aea805b30a4c1cb918b6e95b3c1d0f/model.joblib",
+    "python": "security_ai_v2/.studio-venv/Scripts/python.exe",
+    "feature_schema": "cic-network-reduced-1",
+    "feature_order": [
+      "syn_flag_number",
+      "rst_flag_number",
+      "ack_flag_number",
+      "fin_flag_number",
+      "psh_flag_number",
+      "Min",
+      "Max",
+      "AVG",
+      "Std",
+      "IAT"
+    ],
+    "benchmark_threshold": 0.006729660090059042,
+    "live_predictions": true,
+    "window_packets": 10,
+    "max_age_seconds": 30,
+    "idle_thresholds": {
+      "MQTT_BROKER": 0.01184,
+      "CAMERA[192.168.1.252]:81": 0.01114
+    },
+    "idle_validation": {
+      "MQTT_BROKER": {
+        "run_id": "70aea805b30a4c1cb918b6e95b3c1d0f",
+        "window_packets": 10,
+        "threshold": 0.01184,
+        "windows": 10,
+        "normal_windows": 8
+      },
+      "CAMERA[192.168.1.252]:81": {
+        "run_id": "70aea805b30a4c1cb918b6e95b3c1d0f",
+        "window_packets": 10,
+        "threshold": 0.01114,
+        "windows": 15,
+        "normal_windows": 15
+      }
+    }
+  }
+}

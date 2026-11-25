@@ -1,0 +1,1577 @@
+{
+  "created_utc": "2026-11-23T23:54:00.354369+00:00",
+  "status": "OFFLINE_LABELLED_TEST",
+  "decision_eligible": false,
+  "live_feature_parity": "BLOCKED_CLASS_CONDITIONED_GROUPING_AND_UNVERIFIED_EXTRACTOR",
+  "model": {
+    "run_id": "70aea805b30a4c1cb918b6e95b3c1d0f",
+    "sha256": "7c1fb515944e68e1803df9c1c94465e6ef8656d59b77ee008e04912d94587de9",
+    "feature_order": [
+      "syn_flag_number",
+      "rst_flag_number",
+      "ack_flag_number",
+      "fin_flag_number",
+      "psh_flag_number",
+      "Min",
+      "Max",
+      "AVG",
+      "Std",
+      "IAT"
+    ]
+  },
+  "dataset": {
+    "manifest_sha256": "b049fb6de2952cbe51424d0dfb165ca68f6b022b55ecaaba04e0810197d29286",
+    "test_sha256": "dc708265d8eac970e5e9344e40402f08ad03ccf83342c042a87c9679f8519647",
+    "group_policy": "EXPLORATORY_FILE_GROUP_SPLIT",
+    "dataset_version": "cic-rebuild-2",
+    "prior_test_evaluation_in_run_report": false
+  },
+  "sampling": {
+    "split": "TEST",
+    "seed": 20261124,
+    "rows_per_family_per_round": 512,
+    "rounds": 10,
+    "total_rows": 15360,
+    "families": [
+      "BENIGN",
+      "DOS",
+      "DDOS"
+    ],
+    "row_reuse_between_rounds": false
+  },
+  "limitations": [
+    "Rounds can contain different rows from the same dataset group.",
+    "Precision depends on this balanced family mix and does not estimate production precision.",
+    "Runtime thresholds are compared on the same dataset rows; profile names do not identify live devices.",
+    "Results do not test the live collector, target attribution or isolation decisions."
+  ],
+  "rounds": [
+    {
+      "round": 1,
+      "prediction_ms_per_row": 0.003966731763208979,
+      "groups_represented": 35,
+      "profiles": {
+        "benchmark": {
+          "rows": 1536,
+          "accuracy": 0.9967447916666666,
+          "precision": 0.9961051606621227,
+          "attack_recall": 0.9990234375,
+          "specificity": 0.9921875,
+          "fpr": 0.0078125,
+          "f1": 0.9975621647976597,
+          "macro_f1": 0.9963325025751275,
+          "roc_auc": 0.9996929168701172,
+          "pr_auc": 0.9998670784202782,
+          "tn": 508,
+          "fp": 4,
+          "fn": 1,
+          "tp": 1023,
+          "confusion_matrix": [
+            [
+              508,
+              4
+            ],
+            [
+              1,
+              1023
+            ]
+          ],
+          "threshold": 0.006729660090059042,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 4,
+              "attack_flag_rate": 0.0078125
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 511,
+              "attack_flag_rate": 0.998046875
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "MQTT_BROKER": {
+          "rows": 1536,
+          "accuracy": 0.9973958333333334,
+          "precision": 0.9970760233918129,
+          "attack_recall": 0.9990234375,
+          "specificity": 0.994140625,
+          "fpr": 0.005859375,
+          "f1": 0.9980487804878049,
+          "macro_f1": 0.9970674430814759,
+          "roc_auc": 0.9996929168701172,
+          "pr_auc": 0.9998670784202782,
+          "tn": 509,
+          "fp": 3,
+          "fn": 1,
+          "tp": 1023,
+          "confusion_matrix": [
+            [
+              509,
+              3
+            ],
+            [
+              1,
+              1023
+            ]
+          ],
+          "threshold": 0.01184,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 3,
+              "attack_flag_rate": 0.005859375
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 511,
+              "attack_flag_rate": 0.998046875
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "CAMERA[192.168.1.252]:81": {
+          "rows": 1536,
+          "accuracy": 0.9973958333333334,
+          "precision": 0.9970760233918129,
+          "attack_recall": 0.9990234375,
+          "specificity": 0.994140625,
+          "fpr": 0.005859375,
+          "f1": 0.9980487804878049,
+          "macro_f1": 0.9970674430814759,
+          "roc_auc": 0.9996929168701172,
+          "pr_auc": 0.9998670784202782,
+          "tn": 509,
+          "fp": 3,
+          "fn": 1,
+          "tp": 1023,
+          "confusion_matrix": [
+            [
+              509,
+              3
+            ],
+            [
+              1,
+              1023
+            ]
+          ],
+          "threshold": 0.01114,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 3,
+              "attack_flag_rate": 0.005859375
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 511,
+              "attack_flag_rate": 0.998046875
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "round": 2,
+      "prediction_ms_per_row": 0.004785091145246649,
+      "groups_represented": 35,
+      "profiles": {
+        "benchmark": {
+          "rows": 1536,
+          "accuracy": 0.99609375,
+          "precision": 0.9941747572815534,
+          "attack_recall": 1.0,
+          "specificity": 0.98828125,
+          "fpr": 0.01171875,
+          "f1": 0.997078870496592,
+          "macro_f1": 0.9955924804349365,
+          "roc_auc": 0.9999923706054688,
+          "pr_auc": 0.9999962001459144,
+          "tn": 506,
+          "fp": 6,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              506,
+              6
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.006729660090059042,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 6,
+              "attack_flag_rate": 0.01171875
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "MQTT_BROKER": {
+          "rows": 1536,
+          "accuracy": 0.99609375,
+          "precision": 0.9941747572815534,
+          "attack_recall": 1.0,
+          "specificity": 0.98828125,
+          "fpr": 0.01171875,
+          "f1": 0.997078870496592,
+          "macro_f1": 0.9955924804349365,
+          "roc_auc": 0.9999923706054688,
+          "pr_auc": 0.9999962001459144,
+          "tn": 506,
+          "fp": 6,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              506,
+              6
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01184,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 6,
+              "attack_flag_rate": 0.01171875
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "CAMERA[192.168.1.252]:81": {
+          "rows": 1536,
+          "accuracy": 0.99609375,
+          "precision": 0.9941747572815534,
+          "attack_recall": 1.0,
+          "specificity": 0.98828125,
+          "fpr": 0.01171875,
+          "f1": 0.997078870496592,
+          "macro_f1": 0.9955924804349365,
+          "roc_auc": 0.9999923706054688,
+          "pr_auc": 0.9999962001459144,
+          "tn": 506,
+          "fp": 6,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              506,
+              6
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01114,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 6,
+              "attack_flag_rate": 0.01171875
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "round": 3,
+      "prediction_ms_per_row": 0.004904492186597054,
+      "groups_represented": 35,
+      "profiles": {
+        "benchmark": {
+          "rows": 1536,
+          "accuracy": 0.9967447916666666,
+          "precision": 0.9951409135082604,
+          "attack_recall": 1.0,
+          "specificity": 0.990234375,
+          "fpr": 0.009765625,
+          "f1": 0.997564539698003,
+          "macro_f1": 0.9963288841767738,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 507,
+          "fp": 5,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              507,
+              5
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.006729660090059042,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 5,
+              "attack_flag_rate": 0.009765625
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "MQTT_BROKER": {
+          "rows": 1536,
+          "accuracy": 0.9973958333333334,
+          "precision": 0.9961089494163424,
+          "attack_recall": 1.0,
+          "specificity": 0.9921875,
+          "fpr": 0.0078125,
+          "f1": 0.9980506822612085,
+          "macro_f1": 0.9970645568168788,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 508,
+          "fp": 4,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              508,
+              4
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01184,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 4,
+              "attack_flag_rate": 0.0078125
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "CAMERA[192.168.1.252]:81": {
+          "rows": 1536,
+          "accuracy": 0.9973958333333334,
+          "precision": 0.9961089494163424,
+          "attack_recall": 1.0,
+          "specificity": 0.9921875,
+          "fpr": 0.0078125,
+          "f1": 0.9980506822612085,
+          "macro_f1": 0.9970645568168788,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 508,
+          "fp": 4,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              508,
+              4
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01114,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 4,
+              "attack_flag_rate": 0.0078125
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "round": 4,
+      "prediction_ms_per_row": 0.0031777994801511036,
+      "groups_represented": 35,
+      "profiles": {
+        "benchmark": {
+          "rows": 1536,
+          "accuracy": 0.998046875,
+          "precision": 0.997078870496592,
+          "attack_recall": 1.0,
+          "specificity": 0.994140625,
+          "fpr": 0.005859375,
+          "f1": 0.9985372988785958,
+          "macro_f1": 0.9977995015450765,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 509,
+          "fp": 3,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              509,
+              3
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.006729660090059042,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 3,
+              "attack_flag_rate": 0.005859375
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "MQTT_BROKER": {
+          "rows": 1536,
+          "accuracy": 0.9993489583333334,
+          "precision": 0.9990243902439024,
+          "attack_recall": 1.0,
+          "specificity": 0.998046875,
+          "fpr": 0.001953125,
+          "f1": 0.9995119570522206,
+          "macro_f1": 0.9992672199728356,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 511,
+          "fp": 1,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              511,
+              1
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01184,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 1,
+              "attack_flag_rate": 0.001953125
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "CAMERA[192.168.1.252]:81": {
+          "rows": 1536,
+          "accuracy": 0.9993489583333334,
+          "precision": 0.9990243902439024,
+          "attack_recall": 1.0,
+          "specificity": 0.998046875,
+          "fpr": 0.001953125,
+          "f1": 0.9995119570522206,
+          "macro_f1": 0.9992672199728356,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 511,
+          "fp": 1,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              511,
+              1
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01114,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 1,
+              "attack_flag_rate": 0.001953125
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "round": 5,
+      "prediction_ms_per_row": 0.003593684889816965,
+      "groups_represented": 34,
+      "profiles": {
+        "benchmark": {
+          "rows": 1536,
+          "accuracy": 0.9967447916666666,
+          "precision": 0.9951409135082604,
+          "attack_recall": 1.0,
+          "specificity": 0.990234375,
+          "fpr": 0.009765625,
+          "f1": 0.997564539698003,
+          "macro_f1": 0.9963288841767738,
+          "roc_auc": 0.9999980926513672,
+          "pr_auc": 0.9999990472560976,
+          "tn": 507,
+          "fp": 5,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              507,
+              5
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.006729660090059042,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 5,
+              "attack_flag_rate": 0.009765625
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "MQTT_BROKER": {
+          "rows": 1536,
+          "accuracy": 0.9973958333333334,
+          "precision": 0.9961089494163424,
+          "attack_recall": 1.0,
+          "specificity": 0.9921875,
+          "fpr": 0.0078125,
+          "f1": 0.9980506822612085,
+          "macro_f1": 0.9970645568168788,
+          "roc_auc": 0.9999980926513672,
+          "pr_auc": 0.9999990472560976,
+          "tn": 508,
+          "fp": 4,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              508,
+              4
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01184,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 4,
+              "attack_flag_rate": 0.0078125
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "CAMERA[192.168.1.252]:81": {
+          "rows": 1536,
+          "accuracy": 0.9973958333333334,
+          "precision": 0.9961089494163424,
+          "attack_recall": 1.0,
+          "specificity": 0.9921875,
+          "fpr": 0.0078125,
+          "f1": 0.9980506822612085,
+          "macro_f1": 0.9970645568168788,
+          "roc_auc": 0.9999980926513672,
+          "pr_auc": 0.9999990472560976,
+          "tn": 508,
+          "fp": 4,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              508,
+              4
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01114,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 4,
+              "attack_flag_rate": 0.0078125
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "round": 6,
+      "prediction_ms_per_row": 0.0030571614502150624,
+      "groups_represented": 35,
+      "profiles": {
+        "benchmark": {
+          "rows": 1536,
+          "accuracy": 0.9986979166666666,
+          "precision": 0.9980506822612085,
+          "attack_recall": 1.0,
+          "specificity": 0.99609375,
+          "fpr": 0.00390625,
+          "f1": 0.9990243902439024,
+          "macro_f1": 0.9985337215407379,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 510,
+          "fp": 2,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              510,
+              2
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.006729660090059042,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 2,
+              "attack_flag_rate": 0.00390625
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "MQTT_BROKER": {
+          "rows": 1536,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "attack_recall": 1.0,
+          "specificity": 1.0,
+          "fpr": 0.0,
+          "f1": 1.0,
+          "macro_f1": 1.0,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 512,
+          "fp": 0,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              512,
+              0
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01184,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 0,
+              "attack_flag_rate": 0.0
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "CAMERA[192.168.1.252]:81": {
+          "rows": 1536,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "attack_recall": 1.0,
+          "specificity": 1.0,
+          "fpr": 0.0,
+          "f1": 1.0,
+          "macro_f1": 1.0,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 512,
+          "fp": 0,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              512,
+              0
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01114,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 0,
+              "attack_flag_rate": 0.0
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "round": 7,
+      "prediction_ms_per_row": 0.0032181640582014857,
+      "groups_represented": 35,
+      "profiles": {
+        "benchmark": {
+          "rows": 1536,
+          "accuracy": 0.99609375,
+          "precision": 0.9941747572815534,
+          "attack_recall": 1.0,
+          "specificity": 0.98828125,
+          "fpr": 0.01171875,
+          "f1": 0.997078870496592,
+          "macro_f1": 0.9955924804349365,
+          "roc_auc": 0.9999980926513672,
+          "pr_auc": 0.9999990472560976,
+          "tn": 506,
+          "fp": 6,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              506,
+              6
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.006729660090059042,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 6,
+              "attack_flag_rate": 0.01171875
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "MQTT_BROKER": {
+          "rows": 1536,
+          "accuracy": 0.9993489583333334,
+          "precision": 0.9990243902439024,
+          "attack_recall": 1.0,
+          "specificity": 0.998046875,
+          "fpr": 0.001953125,
+          "f1": 0.9995119570522206,
+          "macro_f1": 0.9992672199728356,
+          "roc_auc": 0.9999980926513672,
+          "pr_auc": 0.9999990472560976,
+          "tn": 511,
+          "fp": 1,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              511,
+              1
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01184,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 1,
+              "attack_flag_rate": 0.001953125
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "CAMERA[192.168.1.252]:81": {
+          "rows": 1536,
+          "accuracy": 0.9986979166666666,
+          "precision": 0.9980506822612085,
+          "attack_recall": 1.0,
+          "specificity": 0.99609375,
+          "fpr": 0.00390625,
+          "f1": 0.9990243902439024,
+          "macro_f1": 0.9985337215407379,
+          "roc_auc": 0.9999980926513672,
+          "pr_auc": 0.9999990472560976,
+          "tn": 510,
+          "fp": 2,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              510,
+              2
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01114,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 2,
+              "attack_flag_rate": 0.00390625
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "round": 8,
+      "prediction_ms_per_row": 0.002866471353020946,
+      "groups_represented": 34,
+      "profiles": {
+        "benchmark": {
+          "rows": 1536,
+          "accuracy": 0.9986979166666666,
+          "precision": 0.9980506822612085,
+          "attack_recall": 1.0,
+          "specificity": 0.99609375,
+          "fpr": 0.00390625,
+          "f1": 0.9990243902439024,
+          "macro_f1": 0.9985337215407379,
+          "roc_auc": 0.9999980926513672,
+          "pr_auc": 0.9999990472560976,
+          "tn": 510,
+          "fp": 2,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              510,
+              2
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.006729660090059042,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 2,
+              "attack_flag_rate": 0.00390625
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "MQTT_BROKER": {
+          "rows": 1536,
+          "accuracy": 0.9986979166666666,
+          "precision": 0.9980506822612085,
+          "attack_recall": 1.0,
+          "specificity": 0.99609375,
+          "fpr": 0.00390625,
+          "f1": 0.9990243902439024,
+          "macro_f1": 0.9985337215407379,
+          "roc_auc": 0.9999980926513672,
+          "pr_auc": 0.9999990472560976,
+          "tn": 510,
+          "fp": 2,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              510,
+              2
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01184,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 2,
+              "attack_flag_rate": 0.00390625
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "CAMERA[192.168.1.252]:81": {
+          "rows": 1536,
+          "accuracy": 0.9986979166666666,
+          "precision": 0.9980506822612085,
+          "attack_recall": 1.0,
+          "specificity": 0.99609375,
+          "fpr": 0.00390625,
+          "f1": 0.9990243902439024,
+          "macro_f1": 0.9985337215407379,
+          "roc_auc": 0.9999980926513672,
+          "pr_auc": 0.9999990472560976,
+          "tn": 510,
+          "fp": 2,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              510,
+              2
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01114,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 2,
+              "attack_flag_rate": 0.00390625
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "round": 9,
+      "prediction_ms_per_row": 0.0031145833361279074,
+      "groups_represented": 34,
+      "profiles": {
+        "benchmark": {
+          "rows": 1536,
+          "accuracy": 0.9993489583333334,
+          "precision": 0.9990243902439024,
+          "attack_recall": 1.0,
+          "specificity": 0.998046875,
+          "fpr": 0.001953125,
+          "f1": 0.9995119570522206,
+          "macro_f1": 0.9992672199728356,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 511,
+          "fp": 1,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              511,
+              1
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.006729660090059042,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 1,
+              "attack_flag_rate": 0.001953125
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "MQTT_BROKER": {
+          "rows": 1536,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "attack_recall": 1.0,
+          "specificity": 1.0,
+          "fpr": 0.0,
+          "f1": 1.0,
+          "macro_f1": 1.0,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 512,
+          "fp": 0,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              512,
+              0
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01184,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 0,
+              "attack_flag_rate": 0.0
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "CAMERA[192.168.1.252]:81": {
+          "rows": 1536,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "attack_recall": 1.0,
+          "specificity": 1.0,
+          "fpr": 0.0,
+          "f1": 1.0,
+          "macro_f1": 1.0,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 512,
+          "fp": 0,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              512,
+              0
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01114,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 0,
+              "attack_flag_rate": 0.0
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "round": 10,
+      "prediction_ms_per_row": 0.0028339192776153745,
+      "groups_represented": 35,
+      "profiles": {
+        "benchmark": {
+          "rows": 1536,
+          "accuracy": 0.9986979166666666,
+          "precision": 0.9980506822612085,
+          "attack_recall": 1.0,
+          "specificity": 0.99609375,
+          "fpr": 0.00390625,
+          "f1": 0.9990243902439024,
+          "macro_f1": 0.9985337215407379,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 510,
+          "fp": 2,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              510,
+              2
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.006729660090059042,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 2,
+              "attack_flag_rate": 0.00390625
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "MQTT_BROKER": {
+          "rows": 1536,
+          "accuracy": 0.9986979166666666,
+          "precision": 0.9980506822612085,
+          "attack_recall": 1.0,
+          "specificity": 0.99609375,
+          "fpr": 0.00390625,
+          "f1": 0.9990243902439024,
+          "macro_f1": 0.9985337215407379,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 510,
+          "fp": 2,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              510,
+              2
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01184,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 2,
+              "attack_flag_rate": 0.00390625
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        },
+        "CAMERA[192.168.1.252]:81": {
+          "rows": 1536,
+          "accuracy": 0.9986979166666666,
+          "precision": 0.9980506822612085,
+          "attack_recall": 1.0,
+          "specificity": 0.99609375,
+          "fpr": 0.00390625,
+          "f1": 0.9990243902439024,
+          "macro_f1": 0.9985337215407379,
+          "roc_auc": 1.0,
+          "pr_auc": 1.0,
+          "tn": 510,
+          "fp": 2,
+          "fn": 0,
+          "tp": 1024,
+          "confusion_matrix": [
+            [
+              510,
+              2
+            ],
+            [
+              0,
+              1024
+            ]
+          ],
+          "threshold": 0.01114,
+          "families": {
+            "BENIGN": {
+              "rows": 512,
+              "flagged_attack": 2,
+              "attack_flag_rate": 0.00390625
+            },
+            "DOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            },
+            "DDOS": {
+              "rows": 512,
+              "flagged_attack": 512,
+              "attack_flag_rate": 1.0
+            }
+          }
+        }
+      }
+    }
+  ],
+  "pooled": {
+    "groups_represented": 35,
+    "profiles": {
+      "benchmark": {
+        "rows": 15360,
+        "accuracy": 0.9975911458333333,
+        "precision": 0.9964963503649635,
+        "attack_recall": 0.99990234375,
+        "specificity": 0.99296875,
+        "fpr": 0.00703125,
+        "f1": 0.998196441628077,
+        "macro_f1": 0.9972853839693545,
+        "roc_auc": 0.9999692535400391,
+        "pr_auc": 0.9999865868886559,
+        "tn": 5084,
+        "fp": 36,
+        "fn": 1,
+        "tp": 10239,
+        "confusion_matrix": [
+          [
+            5084,
+            36
+          ],
+          [
+            1,
+            10239
+          ]
+        ],
+        "threshold": 0.006729660090059042,
+        "families": {
+          "BENIGN": {
+            "rows": 5120,
+            "flagged_attack": 36,
+            "attack_flag_rate": 0.00703125
+          },
+          "DOS": {
+            "rows": 5120,
+            "flagged_attack": 5119,
+            "attack_flag_rate": 0.9998046875
+          },
+          "DDOS": {
+            "rows": 5120,
+            "flagged_attack": 5120,
+            "attack_flag_rate": 1.0
+          }
+        }
+      },
+      "MQTT_BROKER": {
+        "rows": 15360,
+        "accuracy": 0.9984375,
+        "precision": 0.9977587214967842,
+        "attack_recall": 0.99990234375,
+        "specificity": 0.9955078125,
+        "fpr": 0.0044921875,
+        "f1": 0.9988293824992683,
+        "macro_f1": 0.9982402931286711,
+        "roc_auc": 0.9999692535400391,
+        "pr_auc": 0.9999865868886559,
+        "tn": 5097,
+        "fp": 23,
+        "fn": 1,
+        "tp": 10239,
+        "confusion_matrix": [
+          [
+            5097,
+            23
+          ],
+          [
+            1,
+            10239
+          ]
+        ],
+        "threshold": 0.01184,
+        "families": {
+          "BENIGN": {
+            "rows": 5120,
+            "flagged_attack": 23,
+            "attack_flag_rate": 0.0044921875
+          },
+          "DOS": {
+            "rows": 5120,
+            "flagged_attack": 5119,
+            "attack_flag_rate": 0.9998046875
+          },
+          "DDOS": {
+            "rows": 5120,
+            "flagged_attack": 5120,
+            "attack_flag_rate": 1.0
+          }
+        }
+      },
+      "CAMERA[192.168.1.252]:81": {
+        "rows": 15360,
+        "accuracy": 0.9983723958333334,
+        "precision": 0.9976615024846536,
+        "attack_recall": 0.99990234375,
+        "specificity": 0.9953125,
+        "fpr": 0.0046875,
+        "f1": 0.9987806662439643,
+        "macro_f1": 0.9981668820110885,
+        "roc_auc": 0.9999692535400391,
+        "pr_auc": 0.9999865868886559,
+        "tn": 5096,
+        "fp": 24,
+        "fn": 1,
+        "tp": 10239,
+        "confusion_matrix": [
+          [
+            5096,
+            24
+          ],
+          [
+            1,
+            10239
+          ]
+        ],
+        "threshold": 0.01114,
+        "families": {
+          "BENIGN": {
+            "rows": 5120,
+            "flagged_attack": 24,
+            "attack_flag_rate": 0.0046875
+          },
+          "DOS": {
+            "rows": 5120,
+            "flagged_attack": 5119,
+            "attack_flag_rate": 0.9998046875
+          },
+          "DDOS": {
+            "rows": 5120,
+            "flagged_attack": 5120,
+            "attack_flag_rate": 1.0
+          }
+        }
+      }
+    }
+  }
+}

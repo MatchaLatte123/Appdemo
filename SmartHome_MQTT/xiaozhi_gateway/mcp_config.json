@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "smarthome": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "server.py"
+      ],
+      "tools": {
+        "allow": [
+          "set_relay",
+          "set_fan_level",
+          "get_device_status",
+          "get_fan_telemetry",
+          "set_relay_schedule",
+          "set_fan_schedule",
+          "set_fan_temperature",
+          "set_fan_motion",
+          "set_motion",
+          "set_relay_automation_mode",
+          "creat_timer_fan"
+        ]
+      }
+    }
+  }
+}

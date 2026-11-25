@@ -1,0 +1,326 @@
+{
+  "generated_utc": "2026-11-24T00:37:24.567568+00:00",
+  "method": "FEATURE_LEVEL_REPLAY",
+  "source_sha256": "dc708265d8eac970e5e9344e40402f08ad03ccf83342c042a87c9679f8519647",
+  "scope": "MQTT_BROKER",
+  "threshold": 0.01184,
+  "run_id": "70aea805b30a4c1cb918b6e95b3c1d0f",
+  "model_sha256": "7c1fb515944e68e1803df9c1c94465e6ef8656d59b77ee008e04912d94587de9",
+  "model_parameters": {
+    "n_estimators": 150,
+    "max_depth": 6,
+    "learning_rate": 0.07
+  },
+  "parity": "BLOCKED_CLASS_CONDITIONED_GROUPING_AND_UNVERIFIED_EXTRACTOR",
+  "decision_eligible": false,
+  "per_scenario": {
+    "BenignTraffic": {
+      "confusion_matrix": [
+        [
+          511,
+          1
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "normal_false_positive_rate": 0.001953125,
+      "attack_recall": null,
+      "precision": 0.0,
+      "f1": 0.0,
+      "false_negatives": 0,
+      "rows": 512
+    },
+    "DoS-UDP_Flood": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          243
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 243
+    },
+    "DoS-TCP_Flood": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          132
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 132
+    },
+    "DoS-HTTP_Flood": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          52
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 52
+    },
+    "DoS-SYN_Flood": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          85
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 85
+    },
+    "DDoS-PSHACK_FLOOD": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          242
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 242
+    },
+    "DDoS-TCP_Flood": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          27
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 27
+    },
+    "DDoS-UDP_Fragmentation": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          8
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 8
+    },
+    "DDoS-ICMP_Flood": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          35
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 35
+    },
+    "DDoS-SYN_Flood": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          66
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 66
+    },
+    "DDoS-RSTFINFLOOD": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          10
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 10
+    },
+    "DDoS-ACK_Fragmentation": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          17
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 17
+    },
+    "DDoS-SynonymousIP_Flood": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          35
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 35
+    },
+    "DDoS-UDP_Flood": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          63
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 63
+    },
+    "DDoS-ICMP_Fragmentation": {
+      "confusion_matrix": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          9
+        ]
+      ],
+      "normal_false_positive_rate": null,
+      "attack_recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "false_negatives": 0,
+      "rows": 9
+    }
+  },
+  "families": {
+    "BENIGN": {
+      "rows": 512,
+      "predicted_attack": 1,
+      "normal_false_positive_rate": 0.001953125
+    },
+    "DOS": {
+      "rows": 512,
+      "predicted_attack": 512,
+      "attack_recall": 1.0
+    },
+    "DDOS": {
+      "rows": 512,
+      "predicted_attack": 512,
+      "attack_recall": 1.0
+    }
+  },
+  "dataset_id": "b049fb6de2952cbe",
+  "test_status": "REUSED_TEST_BENCHMARK",
+  "metrics": {
+    "confusion_matrix": [
+      [
+        511,
+        1
+      ],
+      [
+        0,
+        1024
+      ]
+    ],
+    "normal_false_positive_rate": 0.001953125,
+    "attack_recall": 1.0,
+    "precision": 0.9990243902439024,
+    "f1": 0.9995119570522206,
+    "false_negatives": 0,
+    "rows": 1536
+  },
+  "independent_incidents": null
+}

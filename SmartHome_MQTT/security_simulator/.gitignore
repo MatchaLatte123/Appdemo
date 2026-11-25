@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+.pio/
+include/simulator_config.h
+state/
+config/studio.local.json
