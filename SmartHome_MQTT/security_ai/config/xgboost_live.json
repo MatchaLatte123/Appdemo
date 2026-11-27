@@ -1,0 +1,31 @@
+{
+  "xgboost_shadow": {
+    "run_id": "70aea805b30a4c1cb918b6e95b3c1d0f",
+    "sha256": "7c1fb515944e68e1803df9c1c94465e6ef8656d59b77ee008e04912d94587de9",
+    "dataset_version": "cic-rebuild-2",
+    "artifact": "security_ai/dataset/work_70_15_15/runs/70aea805b30a4c1cb918b6e95b3c1d0f/model.joblib",
+    "feature_schema": "cic-network-reduced-1",
+    "feature_order": [
+      "syn_flag_number",
+      "rst_flag_number",
+      "ack_flag_number",
+      "fin_flag_number",
+      "psh_flag_number",
+      "Min",
+      "Max",
+      "AVG",
+      "Std",
+      "IAT"
+    ],
+    "benchmark_threshold": 0.006729660090059042,
+    "window_packets": 10,
+    "idle_thresholds": {
+      "MQTT_BROKER": 0.06417,
+      "CAMERA[192.168.1.252]:81": 0.02413
+    },
+    "python": "security_ai/.studio-venv/Scripts/python.exe",
+    "live_predictions": true,
+    "peer_predictions": true,
+    "max_age_seconds": 30
+  }
+}

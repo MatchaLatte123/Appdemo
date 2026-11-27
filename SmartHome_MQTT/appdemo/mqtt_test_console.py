@@ -14,12 +14,6 @@ import numpy as np
 from PIL import Image, ImageTk
 import paho.mqtt.client as mqtt
 
-if __package__:
-    from .security_dashboard import open_dashboard
-else:
-    from security_dashboard import open_dashboard
-
-
 # ============================================================
 # CONFIG
 # ============================================================
@@ -37,9 +31,7 @@ T = {
     "fc": "smarthome/device/fan01/control",
 
     "cs": "smarthome/device/cam01/status",
-    "csec": "smarthome/device/cam01/security",
 
-    "sec": "smarthome/security/#",
 }
 
 
@@ -114,6 +106,13 @@ def load_profiles():
     try:
         if PROFILE_FILE.exists():
             profiles = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
+            for profile in profiles.values():
+                if not isinstance(profile, dict):
+                    continue
+                for fields in (profile, profile.get("settings")):
+                    if isinstance(fields, dict):
+                        for key in ("security_state", "quarantined", "security_topic"):
+                            fields.pop(key, None)
     except Exception as e:
         profiles = {}
         print(f"Profile load error: {e}")
@@ -171,7 +170,7 @@ def default_settings_for(device_type):
     if dtype == "relay":
         pir_defaults = [
             ("PIR-SR602-01", 16), ("PIR-SR602-02", 17),
-            ("PIR-SR602-03", None), ("PIR-SR602-04", None),
+            ("PIR-SR602-03", 25), ("PIR-SR602-04", 26),
         ]
         days_default = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
         return {
@@ -180,10 +179,6 @@ def default_settings_for(device_type):
                 {"id": i + 1, "name": f"Relay {i + 1}", "room": "", "automation_mode": "manual", "motion": {"sensor_id": sensor, "gpio": gpio, "configured": False, "hold_seconds": 120, "cooldown_seconds": 3}, "default_state": False, "schedule_on": "08:00", "schedule_off": "22:00", "schedule_days": days_default.copy()}
                 for i, (sensor, gpio) in enumerate(pir_defaults)
             ]
-        }
-    if dtype == "camera":
-        return {
-            "security_state": "NORMAL"
         }
     return {}
 
@@ -259,17 +254,6 @@ def delete_device(device_id):
             "Profile cũ chưa bị xóa khỏi AppDemo."
         )
         return
-
-    # Camera security state has a dedicated security topic in the project.
-    # Put it back into NORMAL as part of the delete/reset operation.
-    if dtype == "camera":
-        security_topic = p.get("security_topic") or f"smarthome/device/{device_short_id(device_id)}/security"
-        security_payload = {
-            "device_id": device_id,
-            "security_state": "NORMAL",
-            "quarantined": False
-        }
-        pub(security_topic, json.dumps(security_payload, ensure_ascii=False), retain=True)
 
     # Do not add the device to nearby_devices here.
     # A device belongs in the nearby list only when a LIVE MQTT packet
@@ -370,7 +354,7 @@ def sync_profile(device_id):
             motion = dict(defaults_motion)
             if isinstance(base.get("motion"), dict):
                 motion.update(base["motion"])
-            sensor_gpios = {"PIR-SR602-01": 16, "PIR-SR602-02": 17, "PIR-SR602-03": None, "PIR-SR602-04": None}
+            sensor_gpios = {"PIR-SR602-01": 16, "PIR-SR602-02": 17, "PIR-SR602-03": 25, "PIR-SR602-04": 26}
             if motion.get("sensor_id") not in sensor_gpios:
                 motion["sensor_id"] = defaults_motion["sensor_id"]
             motion["gpio"] = sensor_gpios[motion["sensor_id"]]
@@ -629,7 +613,7 @@ def edit_profile(device_id):
             mvar = tk.StringVar(value=c.get("automation_mode") if c.get("automation_mode") in ("manual", "motion", "schedule", "schedule_motion") else ("schedule" if old_mode == "schedule" else "manual"))
             motion = c.get("motion") if isinstance(c.get("motion"), dict) else {}
             defaults_motion = defaults["channels"][i - 1]["motion"]
-            pir_sensor_gpios = {"PIR-SR602-01": 16, "PIR-SR602-02": 17, "PIR-SR602-03": None, "PIR-SR602-04": None}
+            pir_sensor_gpios = {"PIR-SR602-01": 16, "PIR-SR602-02": 17, "PIR-SR602-03": 25, "PIR-SR602-04": 26}
             sensor_ids = tuple(pir_sensor_gpios)
             initial_sensor = motion.get("sensor_id") if motion.get("sensor_id") in pir_sensor_gpios else defaults_motion["sensor_id"]
             motion_selected = tk.BooleanVar(value=bool(motion.get("configured", False)) and pir_sensor_gpios[initial_sensor] is not None)
@@ -971,8 +955,6 @@ def connected(c, userdata, flags, reason_code, properties=None):
         T["fs"],
         T["ft"],
         T["cs"],
-        T["csec"],
-        T["sec"],
         DISCOVERY_TOPIC,
         REGISTER_TOPIC,
         "smarthome/device/+/config_ack",
@@ -2568,7 +2550,6 @@ def message(c, userdata, msg):
                 "stream_port": data.get("stream_port", 81),
                 "http_port": data.get("http_port", 80),
                 "config_topic": data.get("config_topic") or f"smarthome/device/cam01/config",
-                "security_topic": T["csec"],
             }
             touch_pending_device(did, nearby)
             log(f"[DISCOVERY] Live camera signal: {did} IP={data.get('ip', '')}")
@@ -2578,17 +2559,9 @@ def message(c, userdata, msg):
 
         if "online" in data:
             update_card(did, "online", "ONLINE" if data["online"] else "OFFLINE")
-        if "security_state" in data:
-            update_card(did, "security", str(data["security_state"]))
         if "ip" in data:
             update_card(did, "ip", str(data["ip"]))
         return
-
-    if msg.topic == T["csec"]:
-        did = did or "ESP32-CAM-01"
-        state = data.get("state") or data.get("security_state")
-        if state is not None:
-            update_card(did, "security", str(state))
 
 
 # ============================================================
@@ -2753,62 +2726,6 @@ def fan(level):
     )
 
 
-# ============================================================
-# CAMERA SECURITY STATE
-# ============================================================
-
-def camstate(state):
-
-    payload = {
-        "action": "SET_SECURITY_STATE",
-        "state": state
-    }
-
-    pub(
-        T["csec"],
-        json.dumps(payload)
-    )
-
-
-# ============================================================
-# QUARANTINE
-# ============================================================
-
-def quarantine(device):
-
-    payload = {
-        "device_id": device,
-        "action": "QUARANTINE",
-        "reason": "Manual test"
-    }
-
-    topic = f"smarthome/security/{device}"
-
-    pub(
-        topic,
-        json.dumps(payload)
-    )
-
-
-# ============================================================
-# RELEASE
-# ============================================================
-
-def release(device):
-
-    payload = {
-        "device_id": device,
-        "action": "RELEASE",
-        "reason": "Manual test"
-    }
-
-    topic = f"smarthome/security/{device}"
-
-    pub(
-        topic,
-        json.dumps(payload)
-    )
-
 def start_camera_stream():
     # Kept for compatibility; the recorder is the ESP32's only stream client.
     auto_start_camera_stream()
@@ -2897,7 +2814,6 @@ ttk.Label(
 # MQTT BROKER
 # ============================================================
 
-ttk.Button(head, text="AI Security", command=lambda: open_dashboard(root)).pack(side="right")
 
 cf = ttk.LabelFrame(
     content_frame,
@@ -3064,26 +2980,16 @@ def create_device_card(device_id, profile):
         ttk.Label(card, text="IP").grid(row=2, column=0, sticky="w")
         widgets["ip"] = ttk.Label(card, text=profile.get("ip", "--"))
         widgets["ip"].grid(row=2, column=1, sticky="w")
-        ttk.Label(card, text="Security").grid(row=3, column=0, sticky="w")
-        widgets["security"] = ttk.Label(card, text="UNKNOWN")
-        widgets["security"].grid(row=3, column=1, sticky="w")
-        for col, state in enumerate(["NORMAL", "SUSPICIOUS", "ATTACKED"], start=2):
-            ttk.Button(
-                card,
-                text=state,
-                command=lambda x=state: camstate(x)
-            ).grid(row=3, column=col, padx=3, pady=6)
-
-        ttk.Label(card, text="Recording Service").grid(row=4, column=0, sticky="w", padx=5, pady=(8, 3))
-        ttk.Label(card, text="Camera IP (MQTT)").grid(row=5, column=0, padx=5, pady=5, sticky="e")
+        ttk.Label(card, text="Recording Service").grid(row=3, column=0, sticky="w", padx=5, pady=(8, 3))
+        ttk.Label(card, text="Camera IP (MQTT)").grid(row=4, column=0, padx=5, pady=5, sticky="e")
         camera_ip = tk.StringVar(value="")
-        ttk.Entry(card, textvariable=camera_ip, width=20, state="readonly").grid(row=5, column=1, padx=5, pady=5, sticky="w")
+        ttk.Entry(card, textvariable=camera_ip, width=20, state="readonly").grid(row=4, column=1, padx=5, pady=5, sticky="w")
         stream_status = ttk.Label(card, text="OFFLINE")
-        stream_status.grid(row=5, column=2, padx=10, sticky="w")
+        stream_status.grid(row=4, column=2, padx=10, sticky="w")
         camera_view = ttk.Label(card, text="Video is recorded by the Camera Server", anchor="center", justify="center")
-        camera_view.grid(row=6, column=0, columnspan=5, padx=5, pady=5)
+        camera_view.grid(row=5, column=0, columnspan=5, padx=5, pady=5)
         ttk.Button(card, text="CAMERA CENTER: LIVE / PLAYBACK", command=open_camera_center).grid(
-            row=7, column=0, columnspan=5, sticky="ew", padx=5, pady=4
+            row=6, column=0, columnspan=5, sticky="ew", padx=5, pady=4
         )
         streamf = card
 
@@ -3092,12 +2998,6 @@ def create_device_card(device_id, profile):
     )
     ttk.Button(card, text="SYNC PROFILE", command=lambda d=device_id: sync_profile(d)).grid(
         row=10, column=1, pady=(8, 0), sticky="w"
-    )
-    ttk.Button(card, text="QUARANTINE", command=lambda d=device_id: quarantine(device_short_id(d))).grid(
-        row=10, column=2, pady=(8, 0)
-    )
-    ttk.Button(card, text="RELEASE", command=lambda d=device_id: release(device_short_id(d))).grid(
-        row=10, column=3, pady=(8, 0)
     )
     ttk.Button(card, text="XÓA THIẾT BỊ", command=lambda d=device_id: delete_device(d)).grid(
         row=10, column=4, pady=(8, 0), padx=(5, 0)

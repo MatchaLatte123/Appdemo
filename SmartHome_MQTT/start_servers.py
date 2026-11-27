@@ -1,4 +1,4 @@
-"""Launch the Video and AI servers from a single external JSON configuration."""
+"""Launch Video Server and optional live AI V2 from an external JSON configuration."""
 import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -32,6 +32,7 @@ class Service:
     route: str
     command: list
     env: dict
+    artifact: Path | None = None
 
     @property
     def probe_host(self):
@@ -52,7 +53,10 @@ class Service:
         if not isinstance(data, dict):
             return None
         if self.name == "ai":
-            return data if data.get("mode") == "BEHAVIORAL_V3" else None
+            ready = (data.get("mode") == "LIVE_V2"
+                     and (data.get("worker") == "READY" or data.get("reason") == "MODEL_ARTIFACT_NOT_FOUND")
+                     and data.get("capture") in ("ACTIVE", "WAITING_FOR_TRAFFIC"))
+            return data if ready else None
         return data if all(key in data for key in ("service", "cameras", "ffmpeg_available")) else None
 
     def verify_port_available(self):
@@ -72,38 +76,40 @@ def checked_port(value):
 
 
 def get_services(settings):
-    video, ai = settings["video"], settings["ai"]
-    video_config, ai_config = path_from(video["config"]), path_from(ai["config"])
+    video = settings["video"]
+    video_config = path_from(video["config"])
     video_settings = read_json(video_config)
-    read_json(ai_config)
     video_port = checked_port(video_settings.get("http_port", 8765))
     video_bind = str(IPv4Address(video_settings.get("http_host", "127.0.0.1")))
-    ai_port = checked_port(ai.get("port", 8767))
-    if video_port == ai_port and video_bind in ("0.0.0.0", "127.0.0.1"):
-        raise ValueError("The configured AI and Video endpoints conflict")
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     bin_paths = [str(path_from(p)) for p in video.get("path_entries", [])]
     video_env = {**env, "PATH": os.pathsep.join([*bin_paths, env.get("PATH", "")])}
-    video_python, ai_python = path_from(video["python"]), path_from(ai["python"])
-    for path in (video_python, ai_python):
-        if not path.is_file():
-            raise FileNotFoundError(f"Python executable not found: {path}")
-    ai_command = [str(ai_python), "-B", "-m", "security_ai_v3.ai_server", "--config", str(ai_config),
-                  "--port", str(ai_port)]
-    live = ai["live"]
-    ai_command += ["--live-continuous", "--live-interface", live["interface"],
-                   "--live-host", str(IPv4Address(live["host"])), "--live-video-port", str(video_port),
-                   "--live-video-config", str(video_config)]
-    if live.get("isolate_decoders") is True:
-        ai_command.append("--isolated-capture")
-        if live.get("capture_budget"):
-            ai_command += ["--capture-budget", str(path_from(live["capture_budget"]))]
+    video_python = path_from(video["python"])
+    if not video_python.is_file():
+        raise FileNotFoundError(f"Python executable not found: {video_python}")
 
-    services = [
-        Service("video", video_bind, video_port, "/health",
-                [str(video_python), "-B", "-m", "recording_service", "--config", str(video_config)], video_env),
-        Service("ai", "127.0.0.1", ai_port, "/api/security/dashboard", ai_command, env),
-    ]
+    service = Service("video", video_bind, video_port, "/health",
+                      [str(video_python), "-B", "-m", "recording_service", "--config", str(video_config)], video_env)
+    services = [service]
+    if ai := settings.get("ai"):
+        config_path = path_from(ai["config"])
+        ai_settings = read_json(config_path)["xgboost_shadow"]
+        artifact = path_from(ai_settings["artifact"])
+        worker_python = path_from(ai_settings["python"])
+        if not worker_python.is_file():
+            raise FileNotFoundError(f"AI worker Python executable not found: {worker_python}")
+        executable = path_from(ai["python"])
+        if not executable.is_file():
+            raise FileNotFoundError(f"Python executable not found: {executable}")
+        port = checked_port(ai["port"])
+        if port == video_port and video_bind in ("0.0.0.0", "127.0.0.1"):
+            raise ValueError("The configured AI and Video endpoints conflict")
+        live = ai["live"]
+        host = str(IPv4Address(live["host"]))
+        command = [str(executable), "-B", "-m", "security_ai.live.server", "--config", str(config_path),
+                   "--video-config", str(video_config), "--host", host, "--interface", live["interface"],
+                   "--port", str(port)]
+        services.append(Service("ai", "127.0.0.1", port, "/health", command, env, artifact))
     return services, video_settings
 
 
@@ -136,8 +142,10 @@ def launch(services, video_settings, logs, timeout):
     with launch_lock(logs):
         pending = []
         for service in services:
-            if service.probe() is not None:
-                print(f"{service.name.upper()} already running at {service.probe_host}:{service.port}", flush=True)
+            health = service.probe()
+            if health is not None:
+                mode = " (capture only; model is missing)" if health.get("reason") == "MODEL_ARTIFACT_NOT_FOUND" else ""
+                print(f"{service.name.upper()} already running at {service.probe_host}:{service.port}{mode}", flush=True)
                 continue
             service.verify_port_available()
             if service.name == "video":
@@ -156,8 +164,10 @@ def launch(services, video_settings, logs, timeout):
         while children and time.monotonic() < deadline:
             for item in children[:]:
                 service, process, log_path = item
-                if service.probe() is not None:
-                    print(f"{service.name.upper()} ready at {service.probe_host}:{service.port}", flush=True)
+                health = service.probe()
+                if health is not None:
+                    mode = f" (capture only; missing {service.artifact})" if health.get("reason") == "MODEL_ARTIFACT_NOT_FOUND" else ""
+                    print(f"{service.name.upper()} ready at {service.probe_host}:{service.port}{mode}", flush=True)
                 elif process.poll() is None:
                     continue
                 else:
@@ -186,7 +196,10 @@ def main():
             verify_video_tools(services[0], video_settings)
             for service in services:
                 print(subprocess.list2cmdline(service.command))
-            return 0
+            absent = [service.artifact for service in services if service.artifact is not None and not service.artifact.is_file()]
+            for artifact in absent:
+                print(f"AI model artifact not found: {artifact}", file=sys.stderr)
+            return int(bool(absent))
         launch(services, video_settings, path_from(settings["logs_dir"]), timeout)
         return 0
     except (OSError, ValueError, TypeError, KeyError, RuntimeError) as error:

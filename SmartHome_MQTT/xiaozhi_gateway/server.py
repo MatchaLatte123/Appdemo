@@ -15,7 +15,12 @@ STALE = int(os.getenv("STATUS_MAX_AGE", "90"))
 PREFIX = "smarthome/device/"
 DEVICES = {"relay01": "ESP32-RELAY-01", "fan01": "ESP32-FAN-01"}
 DAYS = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")
-RELAY_PIRS = {"PIR-SR602-01": 16, "PIR-SR602-02": 17}
+RELAY_PIRS = {
+    "PIR-SR602-01": 16,
+    "PIR-SR602-02": 17,
+    "PIR-SR602-03": 25,
+    "PIR-SR602-04": 26,
+}
 RELAY_MODES = ("manual", "motion", "schedule", "schedule_motion")
 FAN_MODES = {(False, False): "manual", (True, False): "temperature",
              (False, True): "schedule", (True, True): "both"}

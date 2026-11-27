@@ -1,5 +1,4 @@
 """PySide6 validation console. Device / API operations run off the GUI thread."""
-from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import json
@@ -8,19 +7,16 @@ import subprocess
 from time import time
 
 from PySide6 import QtCore, QtWidgets as Qt
-import pyqtgraph as pg
 
-from security_ai_v3.live_monitor import camera_endpoints
+from security_ai.live.cic38 import WINDOW_PACKETS as CIC38_WINDOW_PACKETS
+from security_ai.live.live_monitor import camera_endpoints
 
-from ..ai_client import AiClient, PROJECT
-from ..database import Database
-from ..device_manager import DeviceManager
-from ..feature_audit import inspect
-from ..offline_replay import OfflineReplay
-from ..report_exporter import export
-from ..serial_transport import available_ports
+from ..ai_client import AiClient, ROOT
+from ..csv_demo import LABELS, evaluate_files
+from ..live_model import load_live_model
 from ..service_monitor import snapshot
-from ..session_manager import SCENARIOS, SessionManager
+from .capture_dashboard import CaptureDashboard
+from .presentation import STYLE, attack_score, card, label, lane_name, number, percent, status
 
 
 def plain():
@@ -40,194 +36,283 @@ def utc(stamp):
 class Window(Qt.QMainWindow):
     def __init__(self, deployment):
         super().__init__()
-        self.setWindowTitle("SmartHome Â· IoT Simulation Studio")
-        self.resize(1220, 790)
+        self.setWindowTitle("SmartHome · IoT Simulation Studio")
+        self.resize(1280, 800)
         self.deployment = deployment
         self.ai = AiClient(deployment)
-        self.db = Database(deployment.state_path)
-        self.devices = DeviceManager()
-        self.sessions = SessionManager(self.db, self.devices)
-        self.replay = OfflineReplay(deployment)
+        self.local_model_error = None
+        try:
+            _, self.model_parameters = load_live_model(deployment)
+        except (OSError, ValueError, KeyError) as error:
+            self.model_parameters = {}
+            self.local_model_error = str(error)
         self.io = ThreadPoolExecutor(max_workers=1, thread_name_prefix="studio-observe")
-        self.offline = ThreadPoolExecutor(max_workers=1, thread_name_prefix="studio-replay")
+        self.demo_io = ThreadPoolExecutor(max_workers=1, thread_name_prefix="studio-demo")
+        self.demo_job = None
+        self.demo_paths = ()
         self.pending = []
         self.poll_job = None
-        self.offline_job = None
         self.services = {}
-        self.history_rows = []
-        self.points = deque(maxlen=180)
-        self.last_plot = None
-        self.last_scope = None
         self.closing = False
 
-        self.tabs = Qt.QTabWidget()
-        self.setCentralWidget(self.tabs)
+        self.setStyleSheet(STYLE)
+        shell = Qt.QWidget(objectName="workspace")
+        row = Qt.QHBoxLayout(shell)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        sidebar = Qt.QWidget(objectName="sidebar")
+        sidebar.setFixedWidth(204)
+        rail = Qt.QVBoxLayout(sidebar)
+        rail.setContentsMargins(12, 20, 12, 16)
+        rail.setSpacing(8)
+        rail.addWidget(label("SmartHome", "brand"))
+        rail.addWidget(label("Simulation Studio", "brandCaption"))
+        self.nav = Qt.QListWidget(objectName="navigation")
+        self.nav.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        rail.addWidget(self.nav, 1)
+        self.tabs = Qt.QStackedWidget()
+        self.nav.currentRowChanged.connect(self.tabs.setCurrentIndex)
+        row.addWidget(sidebar)
+        row.addWidget(self.tabs, 1)
+        self.setCentralWidget(shell)
         self.scopes = ["MQTT_BROKER", "VIDEO_API"] + [
             f"CAMERA[{ip}]:{port}" for ip, port in camera_endpoints(deployment.video_config)]
-        self.setStyleSheet("""
-            QMainWindow { background: #eef3f8; }
-            QTabWidget::pane { background: #ffffff; border: 1px solid #cad6e4; }
-            QTabBar::tab { padding: 10px 18px; color: #31445b; }
-            QTabBar::tab:selected { background: #ffffff; color: #075170; }
-            QPushButton { padding: 7px 10px; }
-            QPlainTextEdit, QTableWidget { border: 1px solid #cad6e4; background: #f8fbfe; color: #162c41; }
-            QLabel#headline { color: #113952; font-size: 21px; font-weight: 600; }
-        """)
         self.build_overview()
-        self.build_devices()
-        self.build_physical()
-        self.build_offline()
-        self.build_feature()
-        self.build_evaluation()
-        self.build_history()
-        self.refresh_ports()
-        self.refresh_history()
+        self.build_live()
+        self.build_demo()
+        if deployment.ai_port is None:
+            self.nav.item(self.tabs.indexOf(self.live_tabs.parentWidget())).setHidden(True)
+            self.ai_headline.setText("Chưa cấu hình")
+            self.runtime_label.setText("Kiểm tra kết nối các dịch vụ tại đây.")
+            self.live_title.hide()
+            self.live_table.hide()
+        self.nav.setCurrentRow(0)
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.tick)
         self.timer.start(100)
         self.next_poll = 0
         self.submit(lambda: snapshot(self.deployment), self.render_services)
 
-    def tab(self, title):
-        widget = Qt.QWidget()
-        layout = Qt.QVBoxLayout(widget)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(10)
-        self.tabs.addTab(widget, title)
+    def tab(self, title, subtitle):
+        page = Qt.QWidget(objectName="workspace")
+        layout = Qt.QVBoxLayout(page)
+        layout.setContentsMargins(24, 18, 24, 18)
+        layout.setSpacing(12)
+        heading = label(title, "pageTitle")
+        heading.setWordWrap(True)
+        layout.addWidget(heading)
+        description = label(subtitle, "muted")
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        self.nav.addItem(title)
+        self.tabs.addWidget(page)
         return layout
 
     def actions(self, layout, buttons):
         bar = Qt.QHBoxLayout()
-        for label, handler in buttons:
-            button = Qt.QPushButton(label)
+        for text, handler, *role in buttons:
+            button = Qt.QPushButton(text)
+            if role:
+                button.setProperty("role", role[0])
             button.clicked.connect(handler)
             bar.addWidget(button)
         bar.addStretch()
         layout.addLayout(bar)
         return bar
 
+    def cards(self, layout, titles):
+        line = Qt.QHBoxLayout()
+        values = []
+        for title in titles:
+            widget, value = card(title)
+            line.addWidget(widget, 1)
+            values.append(value)
+        layout.addLayout(line)
+        return values
+
+    def detail(self, layout):
+        pane = plain()
+        button = Qt.QPushButton("Hiện dữ liệu JSON")
+        button.setCheckable(True)
+        button.toggled.connect(pane.setVisible)
+        button.toggled.connect(lambda open_: button.setText(
+            "Ẩn dữ liệu JSON" if open_ else "Hiện dữ liệu JSON"))
+        layout.addWidget(button, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(pane, 1)
+        pane.hide()
+        return pane
+
+    def fill(self, table, rows):
+        table.setRowCount(len(rows))
+        for row, values in enumerate(rows):
+            for col, value in enumerate(values):
+                item = Qt.QTableWidgetItem(str(value))
+                item.setToolTip(str(value))
+                table.setItem(row, col, item)
+
     def table(self, columns):
         table = Qt.QTableWidget(0, len(columns))
         table.setHorizontalHeaderLabels(columns)
+        table.setAlternatingRowColors(True)
+        table.setShowGrid(False)
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(33)
         table.setEditTriggers(Qt.QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(Qt.QAbstractItemView.SelectionBehavior.SelectRows)
         table.horizontalHeader().setStretchLastSection(True)
         return table
 
     def build_overview(self):
-        layout = self.tab("Overview")
-        self.ai_headline = Qt.QLabel("Connecting to AI Server")
-        self.ai_headline.setObjectName("headline")
-        layout.addWidget(self.ai_headline)
-        self.active_label = Qt.QLabel("Physical session idle")
-        layout.addWidget(self.active_label)
-        self.health_label = Qt.QLabel("Checking service health")
+        subtitle = ("Tình trạng AI Server và dự đoán mới nhất trên từng luồng Ethernet."
+                    if self.deployment.ai_port is not None else "Trạng thái kết nối các dịch vụ.")
+        layout = self.tab("Tổng quan", subtitle)
+        self.ai_headline, self.worker_label, self.broker_label, self.recorder_label = self.cards(
+            layout, ("AI Server", "XGBoost", "MQTT Broker", "Video Server"))
+        self.ai_headline.setText("Đang kết nối")
+        self.runtime_label = label(self.deployment.interface, "muted")
+        self.runtime_label.setWordWrap(True)
+        layout.addWidget(self.runtime_label)
+        if self.local_model_error:
+            warning = label(self.local_model_error, "muted")
+            warning.setWordWrap(True)
+            layout.addWidget(warning)
+        self.live_title = label("Kết quả theo luồng", "sectionTitle")
+        layout.addWidget(self.live_title)
+        self.live_table = self.table(("Luồng", "Trạng thái", "Dự đoán", "Điểm attack", "Ngưỡng", "Gói / cửa sổ"))
+        self.live_table.horizontalHeader().setSectionResizeMode(Qt.QHeaderView.ResizeMode.Stretch)
+        self.live_table.horizontalHeader().setSectionResizeMode(0, Qt.QHeaderView.ResizeMode.ResizeToContents)
+        self.live_table.setMaximumHeight(260)
+        layout.addWidget(self.live_table, 2)
+        self.health_label = label("Đang kiểm tra các dịch vụ…", "muted")
         layout.addWidget(self.health_label)
-        self.actions(layout, [("Check service health", lambda: self.submit(
+        self.actions(layout, [("Kiểm tra kết nối", lambda: self.submit(
             lambda: snapshot(self.deployment), self.render_services))])
-        self.overview = plain()
-        layout.addWidget(self.overview)
+        self.overview = self.detail(layout)
+        layout.addStretch()
 
-    def build_devices(self):
-        layout = self.tab("Devices")
-        selection = Qt.QHBoxLayout()
-        self.ports = Qt.QComboBox()
-        selection.addWidget(self.ports, 1)
-        for title, handler in (("Scan COM", self.refresh_ports), ("Connect selected COM", self.connect_port)):
-            button = Qt.QPushButton(title)
-            button.clicked.connect(handler)
-            selection.addWidget(button)
-        layout.addLayout(selection)
-        self.device_table = self.table(("COM", "Device ID", "IP", "Version", "Link", "Mode",
-                                        "Success / attempts", "HTTP", "Safety", "Last seen UTC"))
-        self.device_table.setSelectionMode(Qt.QAbstractItemView.SelectionMode.ExtendedSelection)
-        layout.addWidget(self.device_table)
-        self.actions(layout, [("Set device ID", self.set_id), ("Reset counters", lambda: self.board_command("RESET")),
-                              ("Stop selected", lambda: self.board_command("STOP")),
-                              ("Disconnect selected", self.disconnect_selected), ("Stop all", self.stop_all)])
+    def build_live(self):
+        layout = self.tab("Live", "Theo dõi gói Ethernet và cửa sổ dự đoán theo luồng.")
+        self.live_tabs = Qt.QTabWidget()
+        layout.addWidget(self.live_tabs, 1)
+        self.capture_dashboard = CaptureDashboard(self.scopes, self.table, self.fill)
+        self.live_tabs.addTab(self.capture_dashboard, "Dashboard")
+        cic38_page = Qt.QWidget()
+        self.live_tabs.addTab(cic38_page, "CIC_38")
+        layout = Qt.QVBoxLayout(cic38_page)
+        self.cic38_scope = Qt.QComboBox()
+        for scope in self.scopes:
+            self.cic38_scope.addItem(lane_name(scope), scope)
+        layout.addWidget(self.cic38_scope)
+        self.cic38_status = label("Đang chờ dữ liệu CIC_38.", "muted")
+        self.cic38_status.setWordWrap(True)
+        layout.addWidget(self.cic38_status)
+        self.cic38_result = label("Đang chờ điểm mô hình.", "sectionTitle")
+        self.cic38_result.setWordWrap(True)
+        layout.addWidget(self.cic38_result)
+        self.cic38_probabilities = self.cards(layout, ("Benign", "DoS", "DDoS"))
+        self.cic38_scores = {}
+        self.cic38_values = self.table(("Đặc trưng", "Giá trị thô", "Z-score của Train"))
+        layout.addWidget(self.cic38_values, 1)
+        self.cic38_data = None
+        self.cic38_scope.currentIndexChanged.connect(self.render_cic38)
 
-    def build_physical(self):
-        layout = self.tab("Physical Tests")
-        form = Qt.QFormLayout()
-        self.scenario = Qt.QComboBox()
-        for code, spec in SCENARIOS.items():
-            self.scenario.addItem(f"{code} Â· {spec[0]}", code)
-        form.addRow("Scenario", self.scenario)
-        self.scope = Qt.QComboBox()
-        self.scope.addItems(self.scopes)
-        form.addRow("Protected lane", self.scope)
-        self.duration = Qt.QSpinBox()
-        self.duration.setRange(10, 300)
-        self.duration.setValue(45)
-        form.addRow("Observation seconds", self.duration)
-        self.notes = Qt.QLineEdit()
-        form.addRow("Operator / external client notes", self.notes)
-        self.normal = Qt.QCheckBox("Operator verified the expected activity was normal")
-        form.addRow(self.normal)
-        layout.addLayout(form)
-        guide = Qt.QLabel("Select the participant rows in Devices. Open observation, then start each active board separately.")
-        guide.setWordWrap(True)
-        layout.addWidget(guide)
-        self.actions(layout, [("Open observation", self.open_observation), ("Start one board", self.start_board),
-                              ("Close observation", self.close_observation), ("Stop all", self.stop_all)])
-        self.physical_text = plain()
-        layout.addWidget(self.physical_text)
+    def render_cic38(self):
+        data = self.cic38_data
+        selected = self.cic38_scope.currentData()
+        score = self.cic38_scores.get(selected, {})
+        probabilities = score.get("probabilities", {})
+        if probabilities:
+            scored_end = utc(score["window"]["end"])
+            self.cic38_result.setText(f"Dự đoán {score['prediction']} · Cửa sổ đã chấm lúc {scored_end}")
+        else:
+            self.cic38_result.setText(status(score.get("status", "WAITING_FOR_WINDOW")))
+        for label_name, card in zip(("Benign", "DoS", "DDoS"), self.cic38_probabilities, strict=True):
+            card.setText(attack_score(probabilities.get(label_name)))
+        if data is None:
+            self.cic38_status.setText("Chưa có dữ liệu CIC_38 từ AI Server.")
+            self.cic38_values.setRowCount(0)
+            return
+        size = CIC38_WINDOW_PACKETS
+        windows = data["lanes"].get(selected, {}).get("windows", {})
+        state = windows.get(str(size), windows.get(size, {}))
+        newest = state.get("latest")
+        scope = f"{lane_name(selected)} · {state.get('pending', 0)}/{size} gói đang gom"
+        if newest is None:
+            self.cic38_status.setText(scope + " · Chưa có cửa sổ hoàn chỉnh")
+            self.cic38_values.setRowCount(0)
+            return
+        self.cic38_status.setText(
+            scope + f" · {state['completed']:,} cửa sổ · Gói cuối {utc(newest['end'])}")
+        self.fill(self.cic38_values, [
+            (name, number(newest["features"][name]), number(value))
+            for name, value in zip(data["feature_order"], newest["normalized_vector"], strict=True)
+        ])
 
-    def build_offline(self):
-        layout = self.tab("Offline Attack Tests")
-        form = Qt.QFormLayout()
-        self.input_path = Qt.QLineEdit(placeholderText="Blank uses the pinned TEST Parquet")
-        picker = Qt.QHBoxLayout()
-        picker.addWidget(self.input_path, 1)
-        choose = Qt.QPushButton("Browse")
-        choose.clicked.connect(self.pick_file)
-        picker.addWidget(choose)
-        form.addRow("Local capture / feature file", picker)
-        self.offline_scope = Qt.QComboBox()
-        self.offline_scope.addItems(self.scopes)
-        form.addRow("Read-only threshold profile", self.offline_scope)
-        self.family = Qt.QComboBox()
-        self.family.addItems(["ALL", "BENIGN", "DOS", "DDOS"])
-        form.addRow("Family", self.family)
-        self.original_scenario = Qt.QComboBox(editable=True)
-        self.original_scenario.addItems(["", *self.replay.scenarios()])
-        form.addRow("Original label / capture provenance", self.original_scenario)
-        self.recorded_host = Qt.QLineEdit(placeholderText="Blank uses the deployment host")
-        form.addRow("Recorded protected IPv4 for PCAP", self.recorded_host)
-        self.cap = Qt.QSpinBox()
-        self.cap.setRange(1, 5000)
-        self.cap.setValue(1000)
-        form.addRow("Feature rows per selected family", self.cap)
-        layout.addLayout(form)
-        self.actions(layout, [("Run offline", self.run_offline)])
-        self.offline_text = plain()
-        layout.addWidget(self.offline_text)
+    def build_demo(self):
+        layout = self.tab("Demo", "Chấm CSV offline bằng model CIC_38. Mỗi dòng cần đủ 38 đặc trưng đã chuẩn hóa theo tập Train.")
+        toolbar = Qt.QHBoxLayout()
+        self.demo_browse = Qt.QPushButton("Chọn CSV…")
+        self.demo_browse.clicked.connect(self.choose_demo_files)
+        self.demo_run = Qt.QPushButton("Chạy dự đoán")
+        self.demo_run.setProperty("role", "primary")
+        self.demo_run.setEnabled(False)
+        self.demo_run.clicked.connect(self.run_demo)
+        toolbar.addWidget(self.demo_browse)
+        toolbar.addWidget(self.demo_run)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+        self.demo_status = label("Chọn một hoặc nhiều file CSV.", "muted")
+        self.demo_status.setTextFormat(QtCore.Qt.TextFormat.PlainText)
+        self.demo_status.setWordWrap(True)
+        layout.addWidget(self.demo_status)
+        self.demo_cards = self.cards(layout, ("Tổng số dòng", *LABELS, "Điểm attack TB"))
+        layout.addWidget(label("Tổng hợp theo file", "sectionTitle"))
+        self.demo_table = self.table(("File CSV", "Số dòng", *LABELS, "Điểm attack TB"))
+        self.demo_table.horizontalHeader().setSectionResizeMode(0, Qt.QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.demo_table, 2)
 
-    def build_feature(self):
-        layout = self.tab("Feature Inspector")
-        self.feature_scope = Qt.QComboBox()
-        self.feature_scope.addItems(self.scopes)
-        layout.addWidget(self.feature_scope)
-        self.feature_text = plain()
-        layout.addWidget(self.feature_text)
+    def reset_demo_results(self):
+        for card_value in self.demo_cards:
+            card_value.setText("—")
+        self.fill(self.demo_table, [(path.name, "—", "—", "—", "—", "—") for path in self.demo_paths])
 
-    def build_evaluation(self):
-        layout = self.tab("Evaluation")
-        self.chart = pg.PlotWidget(background="#f7fafc")
-        self.chart.setLabel("left", "Attack score")
-        self.chart.setLabel("bottom", "Observed prediction index")
-        self.chart.setYRange(0, 1)
-        self.score_line = self.chart.plot(pen=pg.mkPen("#006e91", width=2))
-        self.threshold_line = self.chart.plot(pen=pg.mkPen("#cb6b12", width=2, style=QtCore.Qt.PenStyle.DashLine))
-        layout.addWidget(self.chart, 2)
-        self.evaluation = plain()
-        layout.addWidget(self.evaluation, 3)
+    def choose_demo_files(self):
+        folder = self.demo_paths[0].parent if self.demo_paths else ROOT / "security_ai" / "demo" / "output"
+        files, _ = Qt.QFileDialog.getOpenFileNames(self, "Chọn file đặc trưng CIC_38", str(folder), "CSV (*.csv)")
+        if files:
+            self.demo_paths = tuple(Path(file) for file in files)
+            self.reset_demo_results()
+            self.demo_status.setText(f"Đã chọn {len(files)} file CSV.")
+            self.demo_run.setEnabled(True)
 
-    def build_history(self):
-        layout = self.tab("History")
-        self.history_table = self.table(("Session ID", "Scenario", "Devices", "Model", "Started UTC", "Ended UTC", "Status"))
-        layout.addWidget(self.history_table)
-        self.actions(layout, [("Refresh", self.refresh_history), ("Export CSV / JSON / HTML", self.export_selected)])
+    def run_demo(self):
+        if self.demo_job or not self.demo_paths:
+            return
+        self.reset_demo_results()
+        self.demo_browse.setEnabled(False)
+        self.demo_run.setEnabled(False)
+        self.demo_status.setText(f"Đang chấm {len(self.demo_paths)} file CSV…")
+        self.demo_job = self.demo_io.submit(evaluate_files, self.deployment, self.demo_paths)
+
+    def finish_demo(self):
+        future, self.demo_job = self.demo_job, None
+        self.demo_browse.setEnabled(True)
+        self.demo_run.setEnabled(True)
+        try:
+            result = future.result()
+        except Exception as error:
+            self.demo_status.setText(f"Không thể chấm CSV. {error}")
+            return
+        rows = result["rows"]
+        cards = (f"{rows:,}", *(f"{count:,}" for count in result["counts"]), percent(result["mean_attack"]))
+        for widget, value in zip(self.demo_cards, cards, strict=True):
+            widget.setText(value)
+        self.demo_status.setText(f"XGBoost {result['run_id'][:8]} đã chấm {len(result['files'])} file.")
+        self.fill(self.demo_table, [
+            (Path(item["path"]).name, f"{item['rows']:,}", *(f"{count:,}" for count in item["counts"]),
+             percent(item["attack_sum"] / item["rows"]))
+            for item in result["files"]
+        ])
 
     def submit(self, func, handler=None):
         future = self.io.submit(func)
@@ -253,251 +338,77 @@ class Window(Qt.QMainWindow):
         if self.poll_job and self.poll_job.done():
             self.result(self.poll_job, self.render_poll)
             self.poll_job = None
-        if self.offline_job and self.offline_job.done():
-            self.result(self.offline_job, self.render_finished)
-            self.offline_job = None
+        if self.demo_job and self.demo_job.done():
+            self.finish_demo()
         if self.closing:
-            if not self.pending and not self.poll_job and not self.offline_job:
+            if not self.pending and not self.poll_job and not self.demo_job:
                 self.timer.stop()
                 self.close()
             return
-        if not self.poll_job and not self.pending and time() >= self.next_poll:
-            scope = self.feature_scope.currentText()
-            self.poll_job = self.io.submit(self.collect, scope)
+        if self.deployment.ai_port is not None and not self.poll_job and not self.pending and time() >= self.next_poll:
+            self.poll_job = self.io.submit(self.collect)
             self.next_poll = time() + self.deployment.poll_seconds
 
-    def collect(self, scope):
-        states = self.devices.poll()
-        session = self.sessions.active
+    def collect(self):
         try:
             sample = self.ai.sample()
             prediction = sample["xgboost-shadow"]
             overview = sample["overview"]
             features = sample["collector-features"]
-            audit = inspect(scope, prediction, features, self.replay.transformer, enforcement=overview["enforcement"])
-            finished = None
-            if session:
-                scoped = audit if scope == session["scope"] else inspect(
-                    session["scope"], prediction, features, self.replay.transformer, enforcement=overview["enforcement"])
-                peers = self.ai.get("devices")["devices"]
-                incidents = self.ai.get("incidents")["incidents"]
-                lost = self.sessions.observe(scoped, states, peers, overview.get("services", []), incidents)
-                if lost or self.sessions.expired():
-                    finished = self.finish_session("PARTICIPANT_LOST" if lost else "TIME_LIMIT")
-            return {"device_states": states, "audit": audit, "prediction": prediction, "overview": overview,
-                    "active": self.sessions.active.copy() if self.sessions.active else None, "finished": finished}
+            return {"prediction": prediction, "overview": overview, "features": features}
         except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
-            finished = self.finish_session("OBSERVATION_INTERRUPTED") if session else None
-            return {"device_states": states, "error": str(error), "active": None, "finished": finished}
+            return {"error": str(error)}
 
     def render_services(self, result):
         self.services = result
-        self.health_label.setText(
-            f"MQTT TCP {result['mqtt_tcp']}   Â·   Video /health {result['video_http']}   Â·   Probe from Studio host")
+        self.broker_label.setText(status(result["mqtt_tcp"]))
+        code = result["video_http"]
+        self.recorder_label.setText(f"HTTP {code}" if isinstance(code, int) else status(code))
+        self.health_label.setText("Kiểm tra kết nối từ máy chạy Studio.")
 
     def render_poll(self, data):
-        self.render_devices(data["device_states"])
-        if data["finished"]:
-            self.render_finished(data["finished"])
-        active = data["active"]
-        self.active_label.setText(f"Active {active['scenario']} Â· {active['scope']}" if active else "Physical session idle")
         if "error" in data:
-            self.ai_headline.setText("AI observation unavailable")
+            self.ai_headline.setText("Không đọc được")
+            self.worker_label.setText("—")
+            self.live_table.setRowCount(0)
+            self.capture_dashboard.unavailable()
+            self.cic38_data = None
+            self.cic38_scores = {}
+            self.render_cic38()
+            self.runtime_label.setText(self.deployment.interface)
+            self.overview.clear()
             self.statusBar().showMessage(data["error"], 5000)
             return
         prediction, overview = data["prediction"], data["overview"]
+        self.capture_dashboard.update_snapshot(overview["monitoring"], data["features"], prediction)
+        self.cic38_data = data["features"].get("cic38")
+        self.cic38_scores = prediction["lanes"] if self.cic38_data else {}
+        self.render_cic38()
         info = prediction["model"]
-        monitoring = overview["monitoring"]
-        self.ai_headline.setText(f"{monitoring['status']}   Â·   XGBoost {prediction['worker']}   Â·   {info['run_id'][:12]}")
+        self.ai_headline.setText(status(overview["monitoring"]["status"]))
+        self.worker_label.setText(status(prediction["worker"]))
+        action_state = "Áp dụng" if overview["enforcement"] else "Chỉ quan sát"
+        self.runtime_label.setText(
+            f"{self.deployment.interface}   ·   XGBoost {info['run_id'][:12]}   ·   {action_state}")
+        self.fill(self.live_table, [
+            (lane_name(scope), status(lane["status"]), status(lane.get("prediction")),
+             attack_score(lane.get("score")), attack_score(lane.get("threshold")), lane.get("window_packets", "—"))
+            for scope, lane in prediction["lanes"].items()
+        ])
         show_json(self.overview, {
-            "capture_interface": self.deployment.interface, "model": info, "parameters": self.replay.model_parameters,
+            "capture_interface": self.deployment.interface, "model": info, "parameters": self.model_parameters,
             "compatibility": prediction["parity"], "decision_eligible": prediction["decision_eligible"],
             "enforcement": overview["enforcement"], "isolation_assessment": prediction.get("isolation_assessment"),
-            "services": self.services, "active_session": active["id"] if active else None,
+            "services": self.services,
         })
-        audit = data["audit"]
-        if audit["scope"] != self.feature_scope.currentText():
-            return
-        show_json(self.feature_text, audit)
-        if self.last_scope != audit["scope"]:
-            self.points.clear()
-            self.last_plot = None
-            self.last_scope = audit["scope"]
-        if audit["status"] == "PREDICTED" and audit["window"] != self.last_plot:
-            self.last_plot = audit["window"]
-            self.points.append((audit["score"], audit["threshold"]))
-        xs = list(range(len(self.points)))
-        self.score_line.setData(xs, [p[0] for p in self.points])
-        self.threshold_line.setData(xs, [p[1] for p in self.points])
-        if active:
-            show_json(self.physical_text, {"session_id": active["id"], **active["latest_audit"]})
-
-    def refresh_ports(self):
-        selected = self.ports.currentData()
-        self.ports.clear()
-        for port, description in available_ports():
-            self.ports.addItem(f"{port} Â· {description}", port)
-        index = self.ports.findData(selected)
-        if index >= 0:
-            self.ports.setCurrentIndex(index)
-
-    def connect_port(self):
-        port = self.ports.currentData()
-        if port:
-            self.submit(lambda: self.devices.connect(port))
-
-    def selected_ports(self):
-        return [self.device_table.item(i.row(), 0).text()
-                for i in self.device_table.selectionModel().selectedRows()]
-
-    def one_port(self):
-        ports = self.selected_ports()
-        if len(ports) != 1:
-            self.statusBar().showMessage("Select exactly one device row in Devices", 6000)
-            return None
-        return ports[0]
-
-    def render_devices(self, states):
-        selected = set(self.selected_ports())
-        self.device_table.setRowCount(len(states))
-        selection = self.device_table.selectionModel()
-        selection.clearSelection()
-        for index, state in enumerate(states):
-            link = "Offline" if not state["online"] else "Rebooted" if state["rebooted"] else "USB + Wi-Fi" if state["wifi"] else "USB"
-            row = (state["port"], state["device_id"] or "Unassigned", state["ip"], state["version"], link, state["mode"],
-                   f"{state.get('successes', 0)}/{state.get('attempts', 0)}", state.get("http_status", 0),
-                   state.get("safety"), state["last_seen"])
-            for col, value in enumerate(row):
-                self.device_table.setItem(index, col, Qt.QTableWidgetItem(str(value)))
-            if state["port"] in selected:
-                flags = QtCore.QItemSelectionModel.SelectionFlag
-                selection.select(self.device_table.model().index(index, 0), flags.Select | flags.Rows)
-
-    def set_id(self):
-        port = self.one_port()
-        if port:
-            value, accepted = Qt.QInputDialog.getText(self, "Set simulator ID", "ID such as ESP32-SIM-01")
-            if accepted:
-                self.submit(lambda: self.devices.configure_id(port, value.strip()))
-
-    def board_command(self, command):
-        port = self.one_port()
-        if port:
-            self.submit(lambda: self.devices.command(port, command))
-
-    def disconnect_selected(self):
-        port = self.one_port()
-        if port:
-            self.submit(lambda: self.devices.disconnect(port))
-
-    def stop_all(self):
-        def stop():
-            failed = self.devices.stop_all()
-            result = self.finish_session("STOP_REQUESTED")
-            return result, failed
-        self.submit(stop, self.render_stopped)
-
-    def render_stopped(self, result):
-        session, failed = result
-        if session:
-            self.render_finished(session)
-        self.statusBar().showMessage("Stop sent" if not failed else f"Stop unacknowledged: {', '.join(failed)}", 15000)
-
-    def open_observation(self):
-        scenario, scope = self.scenario.currentData(), self.scope.currentText()
-        args = (scenario, scope, self.selected_ports(), self.duration.value(), self.notes.text())
-        verified = self.normal.isChecked()
-
-        def start():
-            sample = self.ai.sample()
-            if sample["xgboost-shadow"]["worker"] != "READY":
-                raise ValueError("Wait for the XGBoost worker to become ready")
-            audit = inspect(scope, sample["xgboost-shadow"], sample["collector-features"], self.replay.transformer,
-                            enforcement=sample["overview"]["enforcement"])
-            return self.sessions.start(*args, audit, snapshot(self.deployment), verified)
-        self.submit(start, lambda row: show_json(self.physical_text, row))
-
-    def start_board(self):
-        port = self.one_port()
-        if port:
-            self.submit(lambda: self.sessions.start_board(port), lambda row: show_json(self.physical_text, row))
-
-    def finish_session(self, reason):
-        result = self.sessions.close({}, reason)
-        if result:
-            result["services_after"] = snapshot(self.deployment)
-            self.db.save(result)
-        return result
-
-    def close_observation(self):
-        self.submit(lambda: self.finish_session("OPERATOR_CLOSED"), self.render_finished)
-
-    def pick_file(self):
-        path, _ = Qt.QFileDialog.getOpenFileName(self, "Select a local input file", str(PROJECT),
-                                               "Capture or features (*.pcap *.pcapng *.csv *.parquet)")
-        if path:
-            self.input_path.setText(path)
-
-    def run_offline(self):
-        if self.offline_job:
-            return
-        path, scope, family = self.input_path.text().strip(), self.offline_scope.currentText(), self.family.currentText()
-        scenario, host = self.original_scenario.currentText().strip(), self.recorded_host.text().strip()
-        cap = self.cap.value()
-        self.offline_text.setPlainText("Evaluating local dataâ€¦")
-
-        def run():
-            if Path(path).suffix.lower() in (".pcap", ".pcapng"):
-                result = self.replay.packet(path, scope, family, scenario, host)
-            else:
-                result = self.replay.dataset(path, scope, family, scenario, cap)
-            return self.sessions.save_offline(result)
-        self.offline_job = self.offline.submit(run)
-
-    def render_finished(self, row):
-        if row is None:
-            return
-        show_json(self.evaluation, row["result"])
-        if row["kind"] == "OFFLINE_REPLAY":
-            show_json(self.offline_text, row["result"])
-        else:
-            show_json(self.physical_text, row)
-        self.refresh_history()
-
-    def refresh_history(self):
-        self.history_rows = self.db.history()
-        self.history_table.setRowCount(len(self.history_rows))
-        for index, session in enumerate(self.history_rows):
-            participants = ", ".join(d["device_id"] for d in session.get("participants", ()))
-            row = (session["id"], session["scenario"], participants, session["model_id"][:12],
-                   utc(session["started"]), utc(session["ended"]) if "ended" in session else "", session["status"])
-            for col, value in enumerate(row):
-                self.history_table.setItem(index, col, Qt.QTableWidgetItem(str(value)))
-
-    def export_selected(self):
-        selected = self.history_table.selectionModel().selectedRows()
-        if len(selected) != 1:
-            self.statusBar().showMessage("Select one session", 5000)
-            return
-        session_id = self.history_table.item(selected[0].row(), 0).text()
-        path = Qt.QFileDialog.getExistingDirectory(self, "Select export destination", str(PROJECT / "reports"))
-        if path:
-            self.submit(lambda: export(self.db.report(session_id), path),
-                        lambda folder: self.statusBar().showMessage(f"Exported {folder}", 12000))
 
     def closeEvent(self, event):
-        if not self.closing:
+        if self.pending or self.poll_job or self.demo_job:
             self.closing = True
             self.setEnabled(False)
-
-            def shutdown():
-                self.finish_session("STUDIO_CLOSED")
-                self.devices.close()
-            self.submit(shutdown)
             event.ignore()
-        elif self.pending or self.poll_job or self.offline_job:
-            event.ignore()
-        else:
-            self.io.shutdown(wait=False)
-            self.offline.shutdown(wait=False)
-            event.accept()
+            return
+        self.timer.stop()
+        self.io.shutdown(wait=False)
+        self.demo_io.shutdown(wait=False)
+        event.accept()

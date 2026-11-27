@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Training Studio · CICIoT2023</title>
+<link rel="stylesheet" href="/studio.css">
+<script src="/studio.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Vào nội dung</a>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="#dataset"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>Training Studio<small>SMART HOME AI SECURITY</small></span></a>
+    <nav aria-label="Các mục Training Studio" id="tabs">
+      <div class="nav-group">
+        <p>Dữ liệu</p>
+        <a href="#dataset" data-tab="dataset">Tổng quan dữ liệu</a>
+        <a href="#features" data-tab="features">Đặc trưng</a>
+      </div>
+      <div class="nav-group">
+        <p>Mô hình</p>
+        <a href="#training" data-tab="training">Huấn luyện</a>
+        <a href="#comparison" data-tab="comparison">So sánh</a>
+        <a href="#evaluation" data-tab="evaluation">Đánh giá</a>
+        <a href="#registry" data-tab="registry">Kho mô hình</a>
+      </div>
+    </nav>
+    <div class="sidebar-footer"><strong>CICIoT2023</strong><span>Network IDS · Normal / Attack</span></div>
+  </aside>
+
+  <div class="workspace">
+    <header class="topbar">
+      <div class="breadcrumb">Studio <span aria-hidden="true">/</span> <strong id="crumb">Tổng quan dữ liệu</strong></div>
+      <div class="top-tools"><span class="status" id="jobStatus" data-state="IDLE">Đang kết nối</span><button id="showLog" class="quiet">Nhật ký</button></div>
+    </header>
+
+    <main id="main">
+      <p class="error" id="message" role="status"></p>
+      <p class="notice" id="trainingOutcome" role="status" hidden></p>
+      <section id="dataset" aria-labelledby="titleDataset">
+        <div class="page-heading">
+          <div><h1 id="titleDataset">Tổng quan dữ liệu</h1>
+          <p>Nguồn CSV, phân bố nhãn và chất lượng các tập dùng để huấn luyện.</p></div>
+          <a class="button primary" href="#training" id="toTraining" hidden>Cấu hình huấn luyện <span aria-hidden="true">→</span></a>
+        </div>
+        <article class="panel dataset-picker">
+          <div class="panel-heading"><div><h2>Nạp dataset</h2><p>Chọn bộ đã lưu hoặc nhập đường dẫn CSV, Parquet hay thư mục có đủ Train, Validation và Test.</p></div></div>
+          <div class="form">
+            <label class="field">Dataset đã lưu <select id="datasetPicker"></select></label>
+            <label class="field">Đường dẫn trên máy <input id="datasetPath" spellcheck="false" placeholder="E:/datasets/session.csv"></label>
+            <label class="field">Cột nhãn <input id="datasetTarget" placeholder="label, y hoặc target"><span class="parameter-hint">Điền tên chính xác nếu dùng cột khác.</span></label>
+            <label class="field">Cột đặc trưng <input id="datasetFeatures" placeholder="Bỏ trống để tự nhận diện"><span class="parameter-hint">Phân cách tên cột bằng dấu phẩy.</span></label>
+          </div>
+          <details>
+            <summary>Chọn đường dẫn riêng cho từng tập</summary>
+            <div class="form">
+              <label class="field">Train <input id="splitTrain" spellcheck="false"></label>
+              <label class="field">Validation <input id="splitValidation" spellcheck="false"></label>
+              <label class="field">Test <input id="splitTest" spellcheck="false"></label>
+            </div>
+          </details>
+          <div class="actions"><button id="loadDataset" class="primary">Nạp dataset</button></div>
+        </article>
+        <div class="metric-grid" id="datasetSummary" aria-live="polite"></div>
+        <div class="dataset-grid">
+          <article class="panel">
+            <div class="panel-heading"><div><h2>Phân chia dữ liệu</h2><p>Tỷ lệ thực tế sau kiểm tra trùng lặp</p></div><span class="pill" id="splitStatus">Đang tải</span></div>
+            <div id="splitBar"></div>
+            <div class="table-wrap" id="splitRows"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-heading"><div><h2>Toàn vẹn dữ liệu</h2><p>Kiểm tra giữa Train, Validation và Test</p></div></div>
+            <dl class="fact-list" id="integrity"></dl>
+            <div class="notice" id="compatibilityNote">Benchmark only · Collector MQTT và Video chưa được xác minh tương thích với dữ liệu huấn luyện.</div>
+          </article>
+        </div>
+      </section>
+
+      <section id="features" aria-labelledby="titleFeatures" hidden>
+        <div class="page-heading"><div><h1 id="titleFeatures">Đặc trưng</h1><p>Thứ tự đặc trưng và thống kê Train của dataset được chọn.</p></div></div>
+        <article class="panel">
+          <div class="panel-heading"><div><h2>Báo cáo đặc trưng</h2><p id="featureDescription" role="status"></p></div>
+          <label class="field compact">Dataset <select id="featureDataset"></select></label></div>
+          <label class="field compact" id="featurePresetField" hidden>Preset <select id="featureset"></select></label>
+          <div id="featureTable" class="table-wrap"></div>
+          <details id="featureDiagnostics" hidden><summary>Tương quan và dữ liệu thiếu</summary><pre id="correlation"></pre></details>
+        </article>
+      </section>
+
+      <section id="training" aria-labelledby="titleTraining" hidden>
+        <div class="page-heading"><div><h1 id="titleTraining">Huấn luyện</h1><p>Chọn thuật toán và thiết lập cho lượt chạy.</p></div></div>
+        <div class="training-grid">
+          <div class="stack">
+            <article class="panel"><div class="panel-heading"><div><h2>Thuật toán</h2><p>Các thuật toán được chọn chạy lần lượt.</p></div><span class="pill" id="algorithmCount"></span></div>
+            <div id="algorithms" class="algorithm-grid"></div></article>
+            <article class="panel"><div class="panel-heading"><div><h2>Cấu hình dữ liệu</h2><p>Giới hạn mẫu, chuẩn hóa và cân bằng lớp.</p></div></div>
+            <div class="form">
+              <label class="field">Chế độ<select id="preset"><option>QUICK_EXPERIMENT</option><option>FULL_TRAINING</option></select></label>
+              <label class="field">Bộ đặc trưng<select id="trainingFeatures"></select></label>
+              <label class="field">Scaling<select id="scaling"><option>AUTO</option><option>STANDARD</option><option>ROBUST</option><option>NONE</option></select></label>
+              <label class="field">Train tối đa mỗi lớp<input id="traincap" type="number" min="0" max="5000000" value="60000">
+                <small class="parameter-hint">Nhập 0 trong FULL để dùng toàn bộ tập train.</small></label>
+              <label class="field">Validation quick tối đa<input id="valcap" type="number" min="100" max="500000" value="30000"></label>
+              <label class="check-field"><input id="balanced" type="checkbox" checked> Trọng số cân bằng lớp</label>
+            </div></article>
+            <article class="panel">
+              <div class="panel-heading"><div><h2>Siêu tham số</h2><p>Chọn thuật toán để chỉnh cấu hình riêng.</p></div></div>
+              <div class="parameter-toolbar">
+                <label class="field">Thuật toán <select id="parameterAlgorithm"></select></label>
+                <label class="field">Preset <select id="level"><option>quick</option><option>default</option><option>strong</option></select></label>
+                <button id="applyPreset" class="secondary" type="button">Áp dụng preset</button>
+                <label class="field">Tìm tham số <input id="parameterSearch" type="search" placeholder="Ví dụ max_depth"></label>
+              </div>
+              <div id="parameterFields" class="parameter-grid" aria-label="Tham số thuật toán"></div>
+              <details><summary>Tham số do Studio quản lý</summary><p id="managedParameters" class="parameter-hint"></p></details>
+              <details>
+                <summary>JSON các thuật toán đã chọn</summary>
+                <label class="field"><span>Cấu hình JSON</span><textarea id="hp" rows="8" spellcheck="false"></textarea></label>
+                <div class="actions"><button id="applyParameterJson" class="secondary" type="button">Áp dụng JSON</button></div>
+              </details>
+            </article>
+          </div>
+          <div class="stack">
+            <article class="panel run-panel"><div class="panel-heading"><div><h2>Lượt chạy</h2><p>Ước tính theo giới hạn mẫu đã chọn.</p></div></div>
+              <dl class="fact-list" id="estimate"></dl>
+              <p id="trainingDataset" class="parameter-hint"></p>
+              <label class="check-field"><input id="autoTest" type="checkbox" checked> Tự chạy Test sau huấn luyện</label>
+              <label class="check-field"><input id="autoReuseTest" type="checkbox"> Dùng lại Test cho lượt tự động</label>
+              <p id="autoTestHint" class="parameter-hint"></p>
+              <button id="train" class="primary block" disabled>Bắt đầu huấn luyện</button>
+              <button class="secondary block cancel" disabled>Dừng job</button>
+            </article>
+            <article class="panel"><div class="panel-heading"><div><h2>Tài nguyên và ngưỡng</h2></div></div>
+              <div class="form compact-form">
+                <label class="field">Luồng CPU<input id="threads" type="number" min="1" max="8" value="2"></label>
+                <label class="field">RAM tối đa (MiB)<input id="memory" type="number" min="512" max="8192" value="2048"></label>
+                <label class="field">Timeout (giây)<input id="timeout" type="number" min="10" max="28800" value="1800"></label>
+                <label class="field">FPR tối đa<input id="fpr" type="number" min="0" max="0.5" value="0.01" step="0.01"></label>
+                <label class="field">Seed<input id="seed" type="number" min="0" max="2147483647" value="42"></label>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="comparison" aria-labelledby="titleComparison" hidden>
+        <div class="page-heading"><div><h1 id="titleComparison">So sánh CIC_38 và CIC_39</h1><p>Chọn một lượt huấn luyện cho mỗi bộ đặc trưng.</p></div></div>
+        <article class="panel">
+          <div class="form">
+            <label class="field">Model CIC_38<select id="compare38"></select></label>
+            <label class="field">Model CIC_39<select id="compare39"></select></label>
+            <label class="field">Tập đánh giá<select id="compareSplit"><option value="test">Test</option><option value="validation">Validation</option></select></label>
+          </div>
+          <p id="comparisonStatus" class="parameter-hint" role="status"></p>
+          <div id="comparisonContent" hidden>
+            <div id="comparisonRows" class="table-wrap"></div>
+            <h3>Precision, Recall và F1 theo lớp</h3>
+            <div id="comparisonClassRows" class="table-wrap"></div>
+            <h3>Confusion Matrix</h3>
+            <p>Hàng là nhãn thật. Cột là nhãn dự đoán.</p>
+            <div class="evaluation-grid">
+              <div><h4>CIC_38</h4><div id="comparisonMatrix38" class="table-wrap"></div></div>
+              <div><h4>CIC_39</h4><div id="comparisonMatrix39" class="table-wrap"></div></div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="evaluation" aria-labelledby="titleEvaluation" hidden>
+        <div class="page-heading"><div><h1 id="titleEvaluation">Đánh giá trên tập Test</h1><p>Chọn dataset và lượt huấn luyện để chấm hoặc xem kết quả Test đã lưu.</p></div></div>
+        <article class="panel">
+          <div class="panel-heading">
+            <label class="field">Dataset <select id="evaluationDatasetPicker"></select></label>
+            <label class="field">Lượt chạy<select id="evalRun"></select></label>
+            <button id="evaluate" class="secondary" disabled>Khóa run và đánh giá Test</button>
+          </div>
+          <label class="check-field"><input id="manualReuseTest" type="checkbox"> Cho phép dùng lại tập Test</label>
+          <p id="evaluationDataset" class="parameter-hint"></p>
+          <p id="evaluationTestStatus" class="parameter-hint"></p>
+          <div class="empty" id="evaluationEmpty" hidden><strong>Chưa có lượt chạy để đánh giá</strong><a class="button secondary" href="#training">Đến Huấn luyện</a></div>
+          <div id="evaluationContent" hidden>
+            <div id="evalTables" class="table-wrap"></div>
+            <section class="test-report" aria-label="Kết quả tập Test">
+              <h2 id="testHeading">Kết quả tập Test</h2>
+              <p id="testMissing">Chưa chấm trên tập Test.</p>
+              <div id="testMetrics" hidden>
+                <div id="testSummary" class="metric-grid"></div>
+                <h3>Precision, Recall và F1 theo lớp</h3>
+                <div id="testClassRows" class="table-wrap"></div>
+                <div id="testClassChart" class="class-chart" aria-label="Biểu đồ chỉ số theo lớp"></div>
+                <h3>Confusion Matrix</h3>
+                <p>Hàng là nhãn thật. Cột là nhãn dự đoán. Ô ngoài đường chéo là lượt phân loại nhầm.</p>
+                <div id="testConfusion" class="table-wrap"></div>
+              </div>
+            </section>
+            <div class="evaluation-grid" id="binaryCurves">
+              <div class="plot"><h3>Precision–Recall</h3><canvas id="pr" width="480" height="250" aria-label="Biểu đồ Precision–Recall"></canvas></div>
+              <div class="plot"><h3>ROC</h3><canvas id="roc" width="480" height="250" aria-label="Biểu đồ ROC"></canvas></div>
+            </div>
+            <details id="testRepeatDetails" hidden>
+              <summary>Lịch sử các lần dùng lại Test</summary>
+              <div id="testRepeatHistory" class="table-wrap"></div>
+            </details>
+            <details id="testDetails" hidden><summary>Chi tiết kết quả Test</summary><pre id="evalDetail"></pre></details>
+          </div>
+        </article>
+      </section>
+
+      <section id="registry" aria-labelledby="titleRegistry" hidden>
+        <div class="page-heading"><div><p class="eyebrow">Phiên bản và kiểm tra hash</p><h1 id="titleRegistry">Kho mô hình</h1><p>Chọn lượt chạy để xuất mô hình, schema và báo cáo đánh giá.</p></div></div>
+        <article class="panel">
+          <div class="panel-heading"><label class="field">Lượt chạy<select id="exportRun"></select></label><button id="export" class="secondary" disabled>Xuất artifact</button></div>
+          <div class="empty" id="registryEmpty"><strong>Chưa có artifact</strong><a class="button secondary" href="#training">Đến Huấn luyện</a></div>
+          <div id="registryRows" class="table-wrap"></div><p id="exportPath" class="notice" hidden></p>
+        </article>
+      </section>
+
+      <aside id="activity" class="activity">
+        <details><summary id="job">Nhật ký xử lý</summary><pre id="logs">Chưa có nhật ký.</pre></details>
+      </aside>
+    </main>
+  </div>
+</div>
+</body>
+</html>

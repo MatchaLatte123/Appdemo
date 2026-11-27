@@ -10,7 +10,7 @@
   },
   "ai": {
     "python": "%LOCALAPPDATA%/Programs/Python/Python313/python.exe",
-    "config": "security_ai_v3/config/ai_server.json",
+    "config": "security_ai/config/xgboost_cic38_59f4c283_live.json",
     "port": 8767,
     "live": {
       "interface": "Ethernet",

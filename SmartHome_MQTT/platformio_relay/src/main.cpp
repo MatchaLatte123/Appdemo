@@ -33,7 +33,6 @@ const char* TOPIC_ANNOUNCE = "smarthome/device/announce";
 const char* TOPIC_STATUS = "smarthome/device/relay01/status";
 const char* TOPIC_TELEMETRY = "smarthome/device/relay01/telemetry";
 const char* TOPIC_CONTROL = "smarthome/device/relay01/control";
-const char* TOPIC_SECURITY = "smarthome/security/relay01";
 const char* TOPIC_CONFIG = "smarthome/device/relay01/config";
 const char* TOPIC_CONFIG_ACK = "smarthome/device/relay01/config_ack";
 
@@ -65,8 +64,6 @@ Preferences prefs;
 // DEVICE STATE
 // =====================================================
 bool relayState[4] = {false, false, false, false};
-String securityState = "NORMAL";
-bool quarantined = false;
 
 // =====================================================
 // PROFILE
@@ -101,7 +98,7 @@ unsigned long lastMotionEdgeAt[4] = {0, 0, 0, 0};
 bool pirLastState[4] = {false, false, false, false};
 bool pirReady[4] = {false, false, false, false};
 const char* PIR_IDS[4] = {"PIR-SR602-01", "PIR-SR602-02", "PIR-SR602-03", "PIR-SR602-04"};
-const int PIR_GPIOS[4] = {16, 17, -1, -1};
+const int PIR_GPIOS[4] = {16, 17, 25, 26};
 int pirActiveGpio[4] = {-1, -1, -1, -1};
 
 unsigned long lastMqttReconnect = 0;
@@ -164,10 +161,6 @@ void applyTargetStates() {
   bool changed = false;
   unsigned long now = millis();
   for (int i = 0; i < 4; ++i) {
-    if (quarantined) {
-      if (relayState[i]) { setRelayState(i + 1, false, false); changed = true; }
-      continue;
-    }
     bool target = relayState[i];
     if (channels[i].automationMode == "manual") continue;
     bool requested = false;
@@ -187,7 +180,7 @@ void applyTargetStates() {
 }
 
 void applyManualCommand(int channel, bool state) {
-  if (channel < 1 || channel > 4 || quarantined) return;
+  if (channel < 1 || channel > 4) return;
   int i = channel - 1;
   if (channels[i].automationMode == "manual") {
     setRelayState(channel, state);
@@ -202,11 +195,6 @@ void applyManualCommand(int channel, bool state) {
 void processPirInputs() {
   unsigned long now = millis();
   for (int i = 0; i < 4; ++i) {
-    if (quarantined) {
-      motionRequest[i] = false;
-      if (pirReady[i]) pirLastState[i] = digitalRead(channels[i].motionGpio) == HIGH;
-      continue;
-    }
     bool motionMode = channels[i].automationMode == "motion" || channels[i].automationMode == "schedule_motion";
     bool motionAllowed = channels[i].automationMode == "motion" ||
       (channels[i].automationMode == "schedule_motion" && scheduleRequest[i]);
@@ -234,8 +222,6 @@ void setDefaultProfile() {
   deviceName = DEVICE_ID;
   deviceRoom = "";
   profileVersion = 0;
-  securityState = "NORMAL";
-  quarantined = false;
   for (int i = 0; i < 4; i++) {
     setDefaultChannel(i);
     relayState[i] = false;
@@ -249,12 +235,10 @@ void setRelayState(int channel, bool state, bool publish) {
   if (channel < 1 || channel > 4) return;
 
   int index = channel - 1;
-  bool actual = quarantined ? false : state;
+  digitalWrite(RELAY_PINS[index], state ? RELAY_ON : RELAY_OFF);
+  relayState[index] = state;
 
-  digitalWrite(RELAY_PINS[index], actual ? RELAY_ON : RELAY_OFF);
-  relayState[index] = actual;
-
-  Serial.printf("[RELAY] CH%d -> %s\n", channel, actual ? "ON" : "OFF");
+  Serial.printf("[RELAY] CH%d -> %s\n", channel, state ? "ON" : "OFF");
 }
 
 void setAllRelayState(bool state) {
@@ -424,11 +408,6 @@ void loadProfile() {
 }
 
 void applyInitialProfile() {
-  if (quarantined) {
-    setAllRelayState(false);
-    return;
-  }
-
   for (int i = 0; i < 4; i++) {
     if (channels[i].automationMode == "manual") {
       setRelayState(i + 1, channels[i].defaultState, false);
@@ -460,8 +439,6 @@ void publishStatus() {
   d["room"] = deviceRoom;
   d["online"] = true;
   d["profile_version"] = profileVersion;
-  d["security_state"] = securityState;
-  d["quarantined"] = quarantined;
 
   for (int i = 0; i < 4; i++) {
     d[String("relay") + String(i + 1)] = relayState[i];
@@ -707,44 +684,6 @@ void applySchedule() {
 }
 
 // =====================================================
-// SECURITY
-// =====================================================
-void handleSecurity(String message) {
-  JsonDocument d;
-  if (deserializeJson(d, message)) return;
-
-  const char* action = d["action"] | "";
-
-  if (strcmp(action, "QUARANTINE") == 0) {
-    quarantined = true;
-    securityState = "QUARANTINED";
-    for (int i = 0; i < 4; ++i) {
-      motionRequest[i] = false;
-      manualOverrideActive[i] = false;
-    }
-    setAllRelayState(false);
-  }
-  else if (strcmp(action, "RELEASE") == 0) {
-    quarantined = false;
-    securityState = "NORMAL";
-    applyInitialProfile();
-    applySchedule();
-  }
-  else if (strcmp(action, "NORMAL") == 0) {
-    quarantined = false;
-    securityState = "NORMAL";
-  }
-  else if (strcmp(action, "SUSPICIOUS") == 0) {
-    securityState = "SUSPICIOUS";
-  }
-  else if (strcmp(action, "ATTACKED") == 0) {
-    securityState = "ATTACKED";
-  }
-
-  publishStatus();
-}
-
-// =====================================================
 // MQTT CALLBACK
 // =====================================================
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -755,14 +694,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.printf("[MQTT RX] topic=%s payload=%s\n", t.c_str(), msg.c_str());
 
   if (t == TOPIC_CONTROL) {
-    if (quarantined) {
-      Serial.println("[CONTROL] Ignored because relay is quarantined");
-      return;
-    }
     handleRelayCommand(msg);
-  }
-  else if (t == TOPIC_SECURITY) {
-    handleSecurity(msg);
   }
   else if (t == TOPIC_CONFIG) {
     handleConfig(msg);
@@ -811,11 +743,10 @@ bool connectMQTT() {
 
   if (mqttClient.connect(clientId.c_str(), MQTT_USERNAME, MQTT_PASSWORD)) {
     bool a = mqttClient.subscribe(TOPIC_CONTROL, 1);
-    bool b = mqttClient.subscribe(TOPIC_SECURITY, 1);
     bool c = mqttClient.subscribe(TOPIC_CONFIG, 1);
 
-    Serial.printf("[MQTT] SUB control=%s security=%s config=%s topic=%s\n",
-      a ? "OK" : "FAIL", b ? "OK" : "FAIL", c ? "OK" : "FAIL", TOPIC_CONFIG);
+    Serial.printf("[MQTT] SUB control=%s config=%s topic=%s\n",
+      a ? "OK" : "FAIL", c ? "OK" : "FAIL", TOPIC_CONFIG);
 
     publishRegister();
     publishStatus();

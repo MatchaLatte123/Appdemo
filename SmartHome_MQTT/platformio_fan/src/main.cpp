@@ -46,9 +46,6 @@ const char* TOPIC_TELEMETRY =
 const char* TOPIC_CONTROL =
     "smarthome/device/fan01/control";
 
-const char* TOPIC_SECURITY =
-    "smarthome/security/fan01";
-
 const char* TOPIC_CONFIG =
     "smarthome/device/fan01/config";
 
@@ -68,9 +65,11 @@ DHT dht(DHT_PIN, DHT_TYPE);
 // L298N
 // =====================================================
 
-#define ENA 25
-#define IN1 26
-#define IN2 27
+// L298N channel B drives the fan through OUT3/OUT4.
+// These values are the ESP32 GPIOs wired to ENB/IN3/IN4.
+#define ENB 25
+#define IN3 26
+#define IN4 27
 
 #define PWM_CHANNEL 0
 #define PWM_FREQ 5000
@@ -91,8 +90,6 @@ Preferences prefs;
 int currentLevel = 0;
 int currentPercent = 0;
 
-String securityState = "NORMAL";
-bool quarantined = false;
 
 // =====================================================
 // DEVICE PROFILE
@@ -186,7 +183,7 @@ void ARDUINO_ISR_ATTR pirRisingISR() {
 }
 
 bool isMotionActive() {
-  return motionEnabled && motionRequest && !quarantined;
+  return motionEnabled && motionRequest;
 }
 
 void initMotionSensor() {
@@ -238,15 +235,6 @@ bool processMotionSensor() {
   pirRisingPending = false;
   interrupts();
   pirRawState = pirState;
-
-  if (quarantined) {
-    bool changed = motionRequest;
-    motionRequest = false;
-    pirLastState = pirState;
-    pirArmed = !pirState;
-    pirHighStartedAt = pirState ? now : 0;
-    return changed;
-  }
 
   if (!pirArmed) {
     if (risingPending) {
@@ -534,10 +522,6 @@ void setFanLevel(int level) {
       3
   );
 
-  if (quarantined) {
-    level = 0;
-  }
-
   // ---------------------------------------------------
   // OFF
   // ---------------------------------------------------
@@ -550,12 +534,12 @@ void setFanLevel(int level) {
     );
 
     digitalWrite(
-        IN1,
+        IN3,
         LOW
     );
 
     digitalWrite(
-        IN2,
+        IN4,
         LOW
     );
 
@@ -574,12 +558,12 @@ void setFanLevel(int level) {
   // ---------------------------------------------------
 
   digitalWrite(
-      IN1,
+      IN3,
       HIGH
   );
 
   digitalWrite(
-      IN2,
+      IN4,
       LOW
   );
 
@@ -805,10 +789,6 @@ bool isWithinSchedule() {
 
 void applyScenario() {
 
-  if (quarantined) {
-    return;
-  }
-
   bool shouldRun = scenarioMode == "manual" &&
       (motionEnabled ? manualRequest : defaultLevel > 0);
 
@@ -1020,12 +1000,6 @@ void publishStatus() {
   d["fan_percent"] =
       currentPercent;
 
-  d["security_state"] =
-      securityState;
-
-  d["quarantined"] =
-      quarantined;
-
   d["profile_version"] =
       profileVersion;
 
@@ -1231,7 +1205,7 @@ void publishConfigAck(
 // profileVersion in NVS, so a normal version=0 config would
 // otherwise be rejected as an old profile.
 //
-// The existing runtime/scenario/MQTT/security functions are
+// The existing runtime/scenario/MQTT functions are
 // preserved; this only adds an explicit profile reset path.
 // =====================================================
 
@@ -1276,10 +1250,8 @@ void resetProfileToDefault() {
   // Reset profile version so the next Add + Sync starts at version 1.
   profileVersion = 0;
 
-  // Reset scenario/security runtime state as well.
+  // Reset scenario runtime state as well.
   autoFanState = false;
-  quarantined = false;
-  securityState = "NORMAL";
 
   saveProfile();
 
@@ -1659,15 +1631,6 @@ void handleFanCommand(
   const char* action =
       d["action"] | "";
 
-  if (quarantined) {
-
-    Serial.println(
-        "[CONTROL] Ignored because device is quarantined"
-    );
-
-    return;
-  }
-
   // ---------------------------------------------------
   // SET LEVEL
   // ---------------------------------------------------
@@ -1735,135 +1698,6 @@ void handleFanCommand(
 }
 
 // =====================================================
-// HANDLE SECURITY
-// =====================================================
-
-void handleSecurity(
-    String message
-) {
-
-  JsonDocument d;
-
-  DeserializationError error =
-      deserializeJson(
-          d,
-          message
-      );
-
-  if (error) {
-
-    Serial.printf(
-        "[SECURITY] JSON ERROR: %s\n",
-        error.c_str()
-    );
-
-    return;
-  }
-
-  const char* action =
-      d["action"] | "";
-
-  // ---------------------------------------------------
-  // QUARANTINE
-  // ---------------------------------------------------
-
-  if (
-      strcmp(
-          action,
-          "QUARANTINE"
-      ) == 0
-  ) {
-
-    quarantined =
-        true;
-
-    offTimerId = "";
-    motionRequest = false;
-    pirArmed = false;
-    noInterrupts();
-    pirRisingPending = false;
-    interrupts();
-
-    securityState =
-        "QUARANTINED";
-
-    setFanLevel(
-        0
-    );
-  }
-
-  // ---------------------------------------------------
-  // RELEASE
-  // ---------------------------------------------------
-
-  else if (
-      strcmp(
-          action,
-          "RELEASE"
-      ) == 0
-  ) {
-
-    quarantined =
-        false;
-
-    securityState =
-        "NORMAL";
-
-    applyScenario();
-  }
-
-  // ---------------------------------------------------
-  // NORMAL
-  // ---------------------------------------------------
-
-  else if (
-      strcmp(
-          action,
-          "NORMAL"
-      ) == 0
-  ) {
-
-    securityState =
-        "NORMAL";
-
-    quarantined =
-        false;
-  }
-
-  // ---------------------------------------------------
-  // SUSPICIOUS
-  // ---------------------------------------------------
-
-  else if (
-      strcmp(
-          action,
-          "SUSPICIOUS"
-      ) == 0
-  ) {
-
-    securityState =
-        "SUSPICIOUS";
-  }
-
-  // ---------------------------------------------------
-  // ATTACKED
-  // ---------------------------------------------------
-
-  else if (
-      strcmp(
-          action,
-          "ATTACKED"
-      ) == 0
-  ) {
-
-    securityState =
-        "ATTACKED";
-  }
-
-  publishStatus();
-}
-
-// =====================================================
 // MQTT CALLBACK
 // =====================================================
 
@@ -1903,19 +1737,6 @@ void callback(
   ) {
 
     handleFanCommand(
-        msg
-    );
-  }
-
-  // ---------------------------------------------------
-  // SECURITY
-  // ---------------------------------------------------
-
-  else if (
-      t == TOPIC_SECURITY
-  ) {
-
-    handleSecurity(
         msg
     );
   }
@@ -2019,12 +1840,6 @@ bool connectMQTT() {
             1
         );
 
-    bool subSecurity =
-        mqttClient.subscribe(
-            TOPIC_SECURITY,
-            1
-        );
-
     bool subConfig =
         mqttClient.subscribe(
             TOPIC_CONFIG,
@@ -2032,11 +1847,8 @@ bool connectMQTT() {
         );
 
     Serial.printf(
-        "[MQTT] SUB control=%s security=%s config=%s topic=%s\n",
+        "[MQTT] SUB control=%s config=%s topic=%s\n",
         subControl
-            ? "OK"
-            : "FAIL",
-        subSecurity
             ? "OK"
             : "FAIL",
         subConfig
@@ -2094,22 +1906,22 @@ void setup() {
   // ---------------------------------------------------
 
   pinMode(
-      IN1,
+      IN3,
       OUTPUT
   );
 
   pinMode(
-      IN2,
+      IN4,
       OUTPUT
   );
 
   digitalWrite(
-      IN1,
+      IN3,
       LOW
   );
 
   digitalWrite(
-      IN2,
+      IN4,
       LOW
   );
 
@@ -2120,7 +1932,7 @@ void setup() {
   );
 
   ledcAttachPin(
-      ENA,
+      ENB,
       PWM_CHANNEL
   );
 

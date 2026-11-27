@@ -4,9 +4,7 @@
     "type": "camera",
     "name": "ESP32-CAM-01",
     "room": "",
-    "settings": {
-      "security_state": "NORMAL"
-    },
+    "settings": {},
     "config_topic": "smarthome/device/cam01/config",
     "version": 1,
     "last_seen": "192.168.1.252",
@@ -33,7 +31,7 @@
             "sensor_id": "PIR-SR602-01",
             "gpio": 16,
             "configured": true,
-            "hold_seconds": 10,
+            "hold_seconds": 3,
             "cooldown_seconds": 3
           },
           "default_state": false,
@@ -59,7 +57,7 @@
             "sensor_id": "PIR-SR602-02",
             "gpio": 17,
             "configured": true,
-            "hold_seconds": 10,
+            "hold_seconds": 3,
             "cooldown_seconds": 3
           },
           "default_state": false,
@@ -83,9 +81,9 @@
           "automation_mode": "manual",
           "motion": {
             "sensor_id": "PIR-SR602-03",
-            "gpio": null,
-            "configured": false,
-            "hold_seconds": 120,
+            "gpio": 25,
+            "configured": true,
+            "hold_seconds": 3,
             "cooldown_seconds": 3
           },
           "default_state": false,
@@ -109,9 +107,9 @@
           "automation_mode": "manual",
           "motion": {
             "sensor_id": "PIR-SR602-04",
-            "gpio": null,
-            "configured": false,
-            "hold_seconds": 120,
+            "gpio": 26,
+            "configured": true,
+            "hold_seconds": 3,
             "cooldown_seconds": 3
           },
           "default_state": false,
@@ -131,11 +129,11 @@
       ]
     },
     "config_topic": "smarthome/device/relay01/config",
-    "version": 9,
+    "version": 18,
     "last_seen": "192.168.1.239",
-    "synced_version": 9,
-    "device_version": 9,
-    "sync_status": "APPLIED",
+    "synced_version": 18,
+    "device_version": 18,
+    "sync_status": "IGNORED_OLD_VERSION",
     "ip": "192.168.1.239"
   },
   "ESP32-FAN-01": {
@@ -144,37 +142,20 @@
     "name": "ESP32-FAN-01",
     "room": "",
     "settings": {
-      "default_level": 3,
-      "auto_mode": true,
-      "scenario_mode": "both",
-      "temperature_enabled": true,
-      "temperature_on": 30.0,
-      "temperature_off": 29.0,
-      "schedule_enabled": true,
-      "schedule_on": "20:00",
-      "schedule_off": "00:00",
-      "schedule_days": [
-        "sun",
-        "mon",
-        "tue",
-        "wed",
-        "thu",
-        "fri",
-        "sat"
-      ],
       "motion": {
-        "enabled": true,
+        "enabled": false,
         "sensor_id": "PIR-FAN-01",
         "gpio": 22,
-        "hold_seconds": 60,
+        "hold_seconds": 5,
         "cooldown_seconds": 3
-      }
+      },
+      "default_level": 0
     },
     "config_topic": "smarthome/device/fan01/config",
-    "version": 11,
+    "version": 17,
     "last_seen": "192.168.1.162",
-    "device_version": 11,
-    "synced_version": 11,
+    "synced_version": 17,
+    "device_version": 17,
     "sync_status": "APPLIED",
     "ip": "192.168.1.162"
   }

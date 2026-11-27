@@ -43,7 +43,6 @@ const int   MQTT_PORT   = 1883;
 const char* ID = "ESP32-CAM-01";
 
 const char* TOPIC_STATUS = "smarthome/device/cam01/status";
-const char* SEC          = "smarthome/device/cam01/security";
 const char* ANNOUNCE     = "smarthome/device/announce";
 const char* REGISTER     = "smarthome/device/register";
 
@@ -58,12 +57,15 @@ WiFiServer api(80);
 WiFiServer stream(81);
 WiFiClient sc;
 
-String state = "NORMAL";
-bool quarantine = false;
 
 unsigned long lastDiscovery = 0;
 unsigned long lastFrame = 0;
 unsigned long lastMqttRetry = 0;
+unsigned long wifiAttemptStarted = 0;
+unsigned long lastWifiRetry = 0;
+unsigned long wifiRetryDelay = 1000;
+bool wifiConnecting = false;
+bool wifiWasConnected = false;
 
 bool capturing = false;
 
@@ -118,9 +120,7 @@ void discovery() {
     ",\"stream_port\":81" +
     ",\"stream\":\"" + streamUrl() +
     "\",\"status_url\":\"" + statusUrl() +
-    "\",\"config_topic\":\"smarthome/device/cam01/config\"" +
-    ",\"security_topic\":\"" + String(SEC) +
-    "\"}";
+    "\",\"config_topic\":\"smarthome/device/cam01/config\"}";
 
   Serial.print("[MQTT] Discovery payload length = ");
   Serial.println(p.length());
@@ -146,8 +146,6 @@ void status() {
     "{\"device_id\":\"" + String(ID) +
     "\",\"device_type\":\"camera\"" +
     ",\"online\":true" +
-    ",\"security_state\":\"" + state +
-    "\",\"quarantined\":" + (quarantine ? String("true") : String("false")) +
     ",\"ip\":\"" + camIp() +
     "\",\"http_port\":80" +
     ",\"stream_port\":81" +
@@ -164,77 +162,53 @@ void status() {
 }
 
 // ============================================================
-// MQTT CALLBACK
-// ============================================================
-
-void cb(char* topic, byte* payload, unsigned len) {
-  String m;
-  m.reserve(len + 1);
-
-  for (unsigned i = 0; i < len; i++) {
-    m += (char)payload[i];
-  }
-
-  Serial.print("[MQTT RX] ");
-  Serial.print(topic);
-  Serial.print(" -> ");
-  Serial.println(m);
-
-  if (m.indexOf("\"action\":\"QUARANTINE\"") >= 0) {
-    quarantine = true;
-    state = "QUARANTINED";
-    status();
-  }
-  else if (m.indexOf("\"action\":\"RELEASE\"") >= 0) {
-    quarantine = false;
-    state = "NORMAL";
-    status();
-  }
-  else if (m.indexOf("\"state\":\"SUSPICIOUS\"") >= 0) {
-    state = "SUSPICIOUS";
-    status();
-  }
-  else if (m.indexOf("\"state\":\"ATTACKED\"") >= 0) {
-    state = "ATTACKED";
-    status();
-  }
-  else if (m.indexOf("\"state\":\"NORMAL\"") >= 0) {
-    state = "NORMAL";
-    status();
-  }
-}
-
-// ============================================================
 // WIFI
 // ============================================================
 
 void wifi() {
-  if (WiFi.status() == WL_CONNECTED) {
+  const unsigned long now = millis();
+  const bool connected = WiFi.status() == WL_CONNECTED;
+
+  if (connected) {
+    wifiConnecting = false;
+    wifiRetryDelay = 1000;
+    if (!wifiWasConnected) {
+      wifiWasConnected = true;
+      Serial.print("[WIFI] Connected. IP = ");
+      Serial.println(WiFi.localIP());
+      api.begin();
+      stream.begin();
+      Serial.println("[HTTP] Status server :80 started");
+      Serial.println("[HTTP] Stream server :81 started");
+      lastMqttRetry = 0;
+    }
     return;
   }
 
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  Serial.print("[WIFI] Connecting");
-
-  unsigned long start = millis();
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print('.');
-
-    if (millis() - start > 20000) {
-      Serial.println();
-      Serial.println("[WIFI] Connection timeout");
-      return;
-    }
+  if (wifiWasConnected) {
+    wifiWasConnected = false;
+    wifiConnecting = false;
+    Serial.println("[WIFI] Disconnected; closing stale clients");
+    mqtt.disconnect();
+    sc.stop();
   }
 
-  Serial.println();
-  Serial.print("[WIFI] Connected. IP = ");
-  Serial.println(WiFi.localIP());
+  if (wifiConnecting && now - wifiAttemptStarted < 20000) return;
+  if (wifiConnecting) {
+    Serial.println("[WIFI] Connection attempt timed out");
+    wifiConnecting = false;
+  }
+  if (now - lastWifiRetry < wifiRetryDelay) return;
+
+  lastWifiRetry = now;
+  wifiAttemptStarted = now;
+  wifiConnecting = true;
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.setAutoReconnect(true);
+  Serial.println("[WIFI] Starting connection attempt");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  wifiRetryDelay = min(wifiRetryDelay * 2, 30000UL);
 }
 
 // ============================================================
@@ -264,16 +238,6 @@ void mc() {
 
   if (mqtt.connect(ID, MQTT_USERNAME, MQTT_PASSWORD)) {
     Serial.println("[MQTT] CONNECTED");
-
-    bool subOK = mqtt.subscribe(SEC);
-
-    if (subOK) {
-      Serial.print("[MQTT] SUBSCRIBED: ");
-      Serial.println(SEC);
-    }
-    else {
-      Serial.println("[MQTT] SUBSCRIBE FAILED");
-    }
 
     // Gửi ngay khi vừa kết nối.
     discovery();
@@ -379,8 +343,6 @@ void apiHandler() {
     String b =
       String("{\"device\":\"ESP32-CAM-01\"") +
       ",\"online\":true" +
-      ",\"security_state\":\"" + state +
-      "\",\"quarantined\":" + (quarantine ? String("true") : String("false")) +
       ",\"ip\":\"" + WiFi.localIP().toString() +
       "\",\"stream\":\"http://" + WiFi.localIP().toString() + ":81/stream\"}";
 
@@ -403,10 +365,13 @@ void apiHandler() {
 // STREAM CONNECTION
 // ============================================================
 
+bool writeStreamData(const uint8_t* data, size_t length, size_t& sent);
+
 void newStream() {
   if (sc && sc.connected()) {
     return;
   }
+  if (sc) sc.stop();
 
   WiFiClient c = stream.available();
 
@@ -425,14 +390,43 @@ void newStream() {
   }
 
   sc = c;
-
-  sc.println("HTTP/1.1 200 OK");
-  sc.println("Content-Type: multipart/x-mixed-replace; boundary=frame");
-  sc.println("Cache-Control: no-cache");
-  sc.println("Access-Control-Allow-Origin: *");
-  sc.println();
+  static const char response[] =
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
+      "Cache-Control: no-cache\r\n"
+      "Access-Control-Allow-Origin: *\r\n\r\n";
+  size_t responseSent = 0;
+  if (!writeStreamData(reinterpret_cast<const uint8_t*>(response),
+                       sizeof(response) - 1, responseSent)) {
+    Serial.printf("[STREAM] Response send failed (%u/%u bytes)\n",
+                  static_cast<unsigned>(responseSent),
+                  static_cast<unsigned>(sizeof(response) - 1));
+    sc.stop();
+    return;
+  }
 
   Serial.println("[STREAM] Client connected");
+}
+
+bool writeStreamData(const uint8_t* data, size_t length, size_t& sent) {
+  sent = 0;
+  unsigned long lastProgress = millis();
+
+  while (sent < length) {
+    size_t written = sc.write(data + sent, length - sent);
+    if (written > 0) {
+      sent += written;
+      lastProgress = millis();
+      continue;
+    }
+
+    if (!sc.connected() || millis() - lastProgress >= 1500) {
+      return false;
+    }
+    delay(1);
+  }
+
+  return true;
 }
 
 // ============================================================
@@ -459,21 +453,31 @@ void frame() {
   }
 
   size_t len = fb->len;
+  char header[96];
+  int headerLength = snprintf(header, sizeof(header),
+                              "--frame\r\nContent-Type: image/jpeg\r\n"
+                              "Content-Length: %u\r\n\r\n",
+                              static_cast<unsigned>(len));
+  size_t headerSent = 0;
+  size_t frameSent = 0;
+  static const uint8_t frameEnd[] = "\r\n";
+  size_t frameEndSent = 0;
 
-  sc.print("--frame\r\n");
-  sc.print("Content-Type: image/jpeg\r\n");
-  sc.print("Content-Length: ");
-  sc.print(len);
-  sc.print("\r\n\r\n");
-
-  size_t written = sc.write(fb->buf, len);
-  sc.print("\r\n");
+  bool sentCompletely = headerLength > 0 &&
+      static_cast<size_t>(headerLength) < sizeof(header) &&
+      writeStreamData(reinterpret_cast<const uint8_t*>(header),
+                      static_cast<size_t>(headerLength), headerSent) &&
+      writeStreamData(fb->buf, len, frameSent) &&
+      writeStreamData(frameEnd, sizeof(frameEnd) - 1, frameEndSent);
 
   esp_camera_fb_return(fb);
   capturing = false;
 
-  if (written != len) {
-    Serial.println("[STREAM] Client disconnected");
+  if (!sentCompletely) {
+    Serial.printf("[STREAM] Send failed (header=%u/%d, frame=%u/%u, end=%u/2); closing client\n",
+                  static_cast<unsigned>(headerSent), headerLength,
+                  static_cast<unsigned>(frameSent), static_cast<unsigned>(len),
+                  static_cast<unsigned>(frameEndSent));
     sc.stop();
   }
 }
@@ -500,7 +504,8 @@ void setup() {
 
   // MQTT configuration.
   mqtt.setServer(MQTT_SERVER, MQTT_PORT);
-  mqtt.setCallback(cb);
+  mqtt.setKeepAlive(30);
+  mqtt.setSocketTimeout(5);
 
   // Quan trọng: tăng packet buffer cho discovery/status JSON.
   mqtt.setBufferSize(2048);
@@ -508,11 +513,6 @@ void setup() {
   Serial.print("[MQTT] Buffer size = ");
   Serial.println(2048);
 
-  api.begin();
-  stream.begin();
-
-  Serial.println("[HTTP] Status server :80 started");
-  Serial.println("[HTTP] Stream server :81 started");
 }
 
 // ============================================================
@@ -520,18 +520,18 @@ void setup() {
 // ============================================================
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    wifi();
-  }
+  wifi();
 
-  if (!mqtt.connected()) {
+  if (WiFi.status() == WL_CONNECTED && !mqtt.connected()) {
     mc();
   }
 
-  mqtt.loop();
+  if (WiFi.status() == WL_CONNECTED && mqtt.connected()) mqtt.loop();
 
-  apiHandler();
-  newStream();
+  if (WiFi.status() == WL_CONNECTED) {
+    apiHandler();
+    newStream();
+  }
 
   // Target 30 FPS (~33 ms/frame).
   // FPS thực tế còn phụ thuộc OV3660, PSRAM, JPEG size và Wi-Fi throughput.

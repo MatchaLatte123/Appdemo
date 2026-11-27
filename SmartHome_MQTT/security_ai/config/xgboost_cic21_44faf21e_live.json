@@ -1,0 +1,40 @@
+{
+  "xgboost_shadow": {
+    "run_id": "44faf21eca84485392e970531c0867f4",
+    "sha256": "75fae5d05e86cce9726961d1c5d0adf21b06111068132c47edcdff8cc2206a37",
+    "dataset_version": "cic-rebuild-21-1",
+    "artifact": "security_ai/dataset/work_cic21_70_15_15/runs/44faf21eca84485392e970531c0867f4/model.joblib",
+    "feature_schema": "cic-network-reduced-1",
+    "feature_order": [
+      "syn_flag_number",
+      "rst_flag_number",
+      "ack_flag_number",
+      "fin_flag_number",
+      "psh_flag_number",
+      "Min",
+      "Max",
+      "AVG",
+      "Std",
+      "IAT",
+      "Rate",
+      "Tot size",
+      "ece_flag_number",
+      "cwr_flag_number",
+      "ack_count",
+      "syn_count",
+      "fin_count",
+      "rst_count",
+      "Header_Length",
+      "Time_To_Live",
+      "HTTP"
+    ],
+    "benchmark_threshold": 0.00023632365628145635,
+    "window_packets": 10,
+    "python": "security_ai/.studio-venv/Scripts/python.exe",
+    "live_predictions": true,
+    "peer_predictions": true,
+    "max_age_seconds": 30
+  },
+  "collect_cic39": false,
+  "cic38_dataset": "security_ai/dataset/processed/CIC_38"
+}

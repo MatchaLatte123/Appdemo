@@ -1,0 +1,11 @@
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+
+$env:MQTT_HOST=192.168.1.130
+$env:MQTT_PORT=1883
+$env:MQTT_USER=xiaozhi_gateway
+$env:MQTT_PASSWORD=Admin123
+$env:STATUS_MAX_AGE=90
+$env:MCP_ENDPOINT=wss://YOUR_XIAOZHI_ENDPOINT_WITH_TOKEN
+
+mcp2xiaozhi run smarthome
